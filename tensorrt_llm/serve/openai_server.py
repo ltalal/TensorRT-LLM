@@ -44,6 +44,21 @@ from tensorrt_llm.serve.postprocess_handlers import (
     chat_stream_post_processor, completion_response_post_processor,
     completion_stream_post_processor)
 from tensorrt_llm.version import __version__ as VERSION
+from tensorrt_llm._torch.pyexecutor.py_executor import PROM_METRICS_FILENAME
+
+from collections import defaultdict
+import array
+import json
+import os
+import traceback
+
+prom_metrics_file = None
+prom_metrics = defaultdict(float, {
+    "num_requests_running": 0,
+    "num_requests_waiting": 0,
+    "prompt_tokens_total": 0,
+    "generation_tokens_total": 0,
+})
 
 from .._utils import nvtx_mark, set_prometheus_multiproc_dir
 
@@ -85,8 +100,8 @@ class OpenAIServer:
         if self.llm.args.return_perf_metrics:
             set_prometheus_multiproc_dir()
             self.metrics_collector = MetricsCollector({
-                "model_name": "undefined",
-                "engine_type": "undefined"
+                "model_name": self.model,
+                "engine_type": "tensorrt_llm"
             })
 
         @asynccontextmanager
@@ -151,8 +166,9 @@ class OpenAIServer:
         self.app.add_api_route("/health_generate", self.health_generate, methods=["GET"])
         self.app.add_api_route("/version", self.version, methods=["GET"])
         self.app.add_api_route("/v1/models", self.get_model, methods=["GET"])
-        # TODO: the metrics endpoint only reports iteration stats, not the runtime stats for now
-        self.app.add_api_route("/metrics", self.get_iteration_stats, methods=["GET"])
+        # TODO: the metrics endpoint only reports runtime stats, not iteration stats
+        self.app.add_api_route("/metrics", self.metrics, methods=["GET"])
+        self.app.add_api_route("/metrics/", self.metrics, methods=["GET"])
         # TODO: workaround before ETCD support
         self.app.add_api_route("/kv_cache_events", self.get_kv_cache_events, methods=["POST"])
         self.app.add_api_route("/v1/completions",
@@ -184,7 +200,12 @@ class OpenAIServer:
             registry=registry,
         ).add().instrument(self.app).expose(self.app)
         metrics_app = make_asgi_app(registry=registry)
-        metrics_route = Mount("/prometheus/metrics", metrics_app)
+
+        async def metrics_wrapper(scope, receive, send):
+            await self.read_metrics_file()
+            await metrics_app(scope, receive, send)
+
+        metrics_route = Mount("/prometheus/metrics", metrics_wrapper)
         metrics_route.path_regex = re.compile("^/prometheus/metrics(?P<path>.*)$")
         self.app.routes.append(metrics_route)
 
@@ -229,10 +250,59 @@ class OpenAIServer:
         ver = {"version": VERSION}
         return JSONResponse(content=ver)
 
+    async def metrics(self) -> Response:
+        global prom_metrics_file
+        await self.read_metrics_file()
+
+        # TODO reroute to /prometheus/metrics if enabled
+
+        resp = ''
+        for metric_key, metric_val in prom_metrics.items():
+            separator = ',' if '{' in metric_key else '{'
+            resp += f'pytrtllm:{metric_key}{separator}model_name="{self.model}"}} {float(metric_val)}\n'
+        return Response(status_code=200, content=resp)
+
+    async def read_metrics_file(self):
+        global prom_metrics_file
+        bufs = None
+        try:
+            if prom_metrics_file is None:
+                prom_metrics_file = os.open(PROM_METRICS_FILENAME,
+                                            os.O_RDWR | os.O_CREAT | os.O_TRUNC)
+            bufs = os.pread(prom_metrics_file, 65536, 0).split(b'\0', 1)
+            if len(bufs) >= 2:
+                keybuf, valbuf = bufs
+                key_list = json.loads(keybuf.decode('UTF-8'))
+                value_list = array.array('d')
+                value_list.frombytes(valbuf)
+                for key, value in zip(key_list, value_list):
+                    prom_metrics[key] = value
+        except:
+            print(bufs)
+            traceback.print_exc()
+        all_requests_done = (
+            prom_metrics["request_completed_total"] +
+            prom_metrics["request_cancelled_total"] +
+            prom_metrics["request_failed_total"])
+        # NOTE: metrics do not update if the other thread is not running any requests.
+        # Make sure to zero out running and waiting in this case.
+        if prom_metrics["request_started_total"] == all_requests_done:
+            prom_metrics["num_requests_waiting"] = prom_metrics["num_requests_running"] = 0
+        else:
+            # Detect number of requests not being processed by the TensorRT-LLM engine.
+            prom_metrics["num_requests_waiting"] = max(0, prom_metrics["request_started_total"] - (
+                prom_metrics["num_requests_running"] + all_requests_done))
+        if self.metrics_collector:
+            self.metrics_collector.num_requests_running.set(prom_metrics["num_requests_running"])
+            self.metrics_collector.num_requests_waiting.set(prom_metrics["num_requests_waiting"])
+            self.metrics_collector.generation_tokens_total.set(prom_metrics["generation_tokens_total"])
+            self.metrics_collector.prompt_tokens_total.set(prom_metrics["prompt_tokens_total"])
+
     async def get_model(self) -> JSONResponse:
         model_list = ModelList(data=[ModelCard(id=self.model)])
         return JSONResponse(content=model_list.model_dump())
 
+    # FIXME: Currently unused
     async def get_iteration_stats(self) -> JSONResponse:
         stats = []
         async for stat in self.llm.get_stats_async(2):
@@ -262,14 +332,17 @@ class OpenAIServer:
                 promise: RequestOutput, postproc_params: PostprocParams) -> AsyncGenerator[str, None]:
             if not self.postproc_worker_enabled:
                 post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
-            async for res in promise:
-                pp_results = res.outputs[0]._postprocess_result if self.postproc_worker_enabled else post_processor(res, args)
-                if res.finished and self.metrics_collector:
-                    self.metrics_collector.log_metrics_dict(res.metrics_dict)
-                for pp_res in pp_results:
-                    yield pp_res
-            yield "data: [DONE]\n\n"
-            nvtx_mark("generation ends")
+            try:
+                async for res in promise:
+                    pp_results = res.outputs[0]._postprocess_result if self.postproc_worker_enabled else post_processor(res, args)
+                    if res.finished and self.metrics_collector:
+                        self.metrics_collector.log_metrics_dict(res.metrics_dict)
+                    for pp_res in pp_results:
+                        yield pp_res
+                yield "data: [DONE]\n\n"
+                nvtx_mark("generation ends")
+            finally:
+                prom_metrics["request_completed_total"] += 1
 
         async def create_chat_response(
                 promise: RequestOutput, postproc_params: PostprocParams, disaggregated_params: Optional[LlmDisaggregatedParams] = None) -> ChatCompletionResponse:
@@ -280,6 +353,8 @@ class OpenAIServer:
                 post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
                 chat_response = post_processor(promise, args)
 
+            prom_metrics["request_completed_total"] += 1
+
             # Add prompt_tokens_ids to the response
             if disaggregated_params and disaggregated_params.request_type and disaggregated_params.request_type == "context_only":
                 chat_response.prompt_token_ids = promise.prompt_token_ids
@@ -287,6 +362,7 @@ class OpenAIServer:
                 self.metrics_collector.log_metrics_dict(promise.metrics_dict)
             return chat_response
 
+        prom_metrics["request_started_total"] += 1
         try:
             check_multiple_response(request.n, self.llm.args.backend)
             conversation: List[ConversationMessage] = []
@@ -360,7 +436,8 @@ class OpenAIServer:
             logger.error(traceback.format_exc())
             # If internal executor error is raised, shutdown the server
             signal.raise_signal(signal.SIGINT)
-        except Exception as e:
+        except BaseException as e:
+            prom_metrics["request_failed_total"] += 1
             logger.error(traceback.format_exc())
             return self.create_error_response(str(e))
 
@@ -393,6 +470,8 @@ class OpenAIServer:
                 # Aggregate prompt token ids for context-only requests
                 if rsp.prompt_token_ids is not None:
                     all_prompt_token_ids.append(rsp.prompt_token_ids)
+
+            prom_metrics["request_completed_total"] += 1
 
             usage_info = UsageInfo(
                 prompt_tokens=num_prompt_tokens,
@@ -438,10 +517,14 @@ class OpenAIServer:
             await asyncio.gather(*tasks)
 
         async def generator_wrapper(generator: AsyncIterator[Any]):
-            async for output in generator:
-                yield output
-            yield "data: [DONE]\n\n"
+            try:
+                async for output in generator:
+                    yield output
+                yield "data: [DONE]\n\n"
+            finally:
+                prom_metrics["request_completed_total"] += 1
 
+        prom_metrics["request_started_total"] += 1
         try:
             check_multiple_response(request.n, self.llm.args.backend)
             if isinstance(request.prompt, str) or \
@@ -494,13 +577,14 @@ class OpenAIServer:
             else:
                 rsps = await asyncio.gather(*[completion_response(promise, params)
                                               for promise, params in zip(promises, postproc_params_collection)])
-                response = merge_completion_responses(rsps) if len(rsps) > 1 else rsps[0]
+                response = merge_completion_responses(rsps)
                 return JSONResponse(content=response.model_dump())
         except CppExecutorError:
             logger.error(traceback.format_exc())
             # If internal executor error is raised, shutdown the server
             signal.raise_signal(signal.SIGINT)
-        except Exception as e:
+        except BaseException as e:
+            prom_metrics["request_failed_total"] += 1
             logger.error(traceback.format_exc())
             return self.create_error_response(str(e))
 
