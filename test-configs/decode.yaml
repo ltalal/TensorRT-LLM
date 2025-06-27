@@ -1,0 +1,16 @@
+kv_cache_config:
+  free_gpu_memory_fraction: 0.8
+moe_config:
+  backend: TRTLLM
+enable_iter_perf_stats: true
+enable_iter_req_stats: true
+return_perf_metrics: true
+max_seq_len: 32768
+max_num_tokens: 32768
+max_batch_size: 80
+cuda_graph_config:
+  batch_sizes: [ 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 28, 32, 38, 40, 44, 48, 52, 56, 64, 72, 80 ]
+  enable_padding: true
+cache_transceiver_config:
+  backend: DEFAULT
+  max_tokens_in_buffer: 32768
