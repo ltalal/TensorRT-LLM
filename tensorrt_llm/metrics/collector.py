@@ -11,7 +11,7 @@ class MetricsCollector:
     labelname_finish_reason = "finished_reason"
 
     def __init__(self, labels: Dict[str, str]) -> None:
-        from prometheus_client import Counter, Histogram
+        from prometheus_client import Counter, Histogram, Gauge
         self.last_log_time = time.time()
         self.labels = labels
         self.metric_prefix = "trtllm_"
@@ -23,6 +23,18 @@ class MetricsCollector:
             **self.labels,
             **self.finish_reason_label
         }
+
+        self.num_requests_running = Gauge(
+            name="num_requests_running",
+            documentation="Number of requests currently being processed.",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.num_requests_waiting = Gauge(
+            name="num_requests_waiting",
+            documentation="Number of requests currently being processed.",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
 
         self.counter_request_success = Counter(
             name=self.metric_prefix + "request_success_total",
@@ -36,7 +48,8 @@ class MetricsCollector:
                 0.3, 0.5, 0.8, 1.0, 1.5, 2.0, 2.5, 5.0, 10.0, 15.0, 20.0, 30.0,
                 40.0, 50.0, 60.0, 120.0, 240.0, 480.0, 960.0, 1920.0, 7680.0
             ],
-            labelnames=self.labels.keys())
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
 
         self.histogram_time_to_first_token = Histogram(
             name=self.metric_prefix + "time_to_first_token_seconds",
@@ -46,7 +59,8 @@ class MetricsCollector:
                 0.75, 1.0, 2.5, 5.0, 7.5, 10.0, 20.0, 40.0, 80.0, 160.0, 640.0,
                 2560.0
             ],
-            labelnames=self.labels.keys())
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
 
         self.histogram_time_per_output_token = Histogram(
             name=self.metric_prefix + "time_per_output_token_seconds",
@@ -55,7 +69,8 @@ class MetricsCollector:
                 0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.75,
                 1.0, 2.5, 5.0, 7.5, 10.0, 20.0, 40.0, 80.0
             ],
-            labelnames=self.labels.keys())
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
 
         self.histogram_queue_time_request = Histogram(
             name=self.metric_prefix + "request_queue_time_seconds",
@@ -65,7 +80,140 @@ class MetricsCollector:
                 0.3, 0.5, 0.8, 1.0, 1.5, 2.0, 2.5, 5.0, 10.0, 15.0, 20.0, 30.0,
                 40.0, 50.0, 60.0, 120.0, 240.0, 480.0, 960.0, 1920.0, 7680.0
             ],
-            labelnames=self.labels.keys())
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.histogram_gpu_prefix_cache_hit_rate = Histogram(
+            name="gpu_prefix_cache_hit_rate",
+            documentation="Histogram of GPU prefix cache hit rate as a ratio (0.0 to 1.0).",
+            buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.histogram_kv_cache_transfer_time = Histogram(
+            name="kv_cache_transfer_time_seconds",
+            documentation="Histogram of KV cache transfer time in seconds.",
+            buckets=[
+                0.001, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.1, 0.25, 0.5,
+                0.75, 1.0, 2.5, 5.0, 7.5, 10.0
+            ],
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.generation_tokens_total = Gauge(
+            name="generation_tokens_total",
+            documentation="Total number of generated tokens.",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.prompt_tokens_total = Gauge(
+            name="prompt_tokens_total",
+            documentation="Total number of prompt tokens.",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.gpu_cache_blocks_free = Gauge(
+            name="gpu_cache_blocks_free",
+            documentation="Number of free block in KV cache",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.gpu_cache_blocks_used = Gauge(
+            name="gpu_cache_blocks_used",
+            documentation="Number of used block in KV cache",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.gpu_cache_blocks_reused_total = Gauge(
+            name="gpu_cache_blocks_reused_total",
+            documentation="Total number of reused block in KV cache",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.gpu_cache_blocks_missed_total = Gauge(
+            name="gpu_cache_blocks_missed_total",
+            documentation="Total number of reused block in KV cache",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.gpu_cache_blocks_max = Gauge(
+            name="gpu_cache_blocks_max",
+            documentation="Total number of blocks in KV cache",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.conf_kv_tokens_per_block = Gauge(
+            name="conf_kv_tokens_per_block",
+            documentation="Size of block in KV cache in tokens",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.gpu_cache_blocks_alloc_total = Gauge(
+            name="gpu_cache_blocks_alloc_total",
+            documentation="Total number of blocks allocated",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.gpu_cache_blocks_alloc_new_total = Gauge(
+            name="gpu_cache_blocks_alloc_new_total",
+            documentation="Total number of new blocks allocated",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.gpu_cache_usage_perc = Gauge(
+            name="gpu_cache_usage_perc",
+            documentation="Percentage of used cache blocks",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.cpu_mem_usage = Gauge(
+            name="cpu_mem_usage",
+            documentation="CPU memory usage in bytes",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.gpu_mem_usage = Gauge(
+            name="gpu_mem_usage",
+            documentation="GPU memory usage in bytes",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.num_iterations_total = Gauge(
+            name="num_iterations_total",
+            documentation="Number of iterations executed",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.num_active_requests = Gauge(
+            name="num_active_requests",
+            documentation="Number of active requests",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.num_queued_requests = Gauge(
+            name="num_queued_requests",
+            documentation="Number of active requests",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.spec_decode_draft_acceptance_rate = Histogram(
+            name="spec_decode_draft_acceptance_rate",
+            documentation="Speculative decoding draft acceptance rate.",
+            buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.spec_decode_num_accepted_tokens = Counter(
+            name="spec_decode_num_accepted_tokens",
+            documentation="Total number of accepted tokens in speculative decoding.",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.spec_decode_num_draft_tokens = Counter(
+            name="spec_decode_num_draft_tokens",
+            documentation="Total number of draft tokens in speculative decoding.",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
 
     def _label_merge(self, labels: Dict[str, str]) -> Dict[str, str]:
         if labels is None or len(labels) == 0:
@@ -79,7 +227,11 @@ class MetricsCollector:
 
     def _log_histogram(self, histogram, data: Union[int, float]) -> None:
         # Convenience function for logging to histogram.
-        histogram.labels(**self.labels).observe(data)
+        histogram.observe(data)
+
+    def _log_gauge(self, gauge, data: Union[int, float]) -> None:
+        # Convenience function for logging to gauge.
+        gauge.set(data)
 
     def log_request_success(self, data: Union[int, float],
                             labels: Dict[str, str]) -> None:
@@ -96,6 +248,16 @@ class MetricsCollector:
         if request_queue_time := data.get(MetricNames.REQUEST_QUEUE_TIME, 0):
             self._log_histogram(self.histogram_queue_time_request,
                                 request_queue_time)
+        if gpu_prefix_cache_hit_rate := data.get(MetricNames.GPU_PREFIX_CACHE_HIT_RATE):
+            self._log_histogram(self.histogram_gpu_prefix_cache_hit_rate, gpu_prefix_cache_hit_rate)
+        if kv_cache_transfer_time := data.get(MetricNames.KV_CACHE_TRANSFER_TIME, 0):
+            self._log_histogram(self.histogram_kv_cache_transfer_time, kv_cache_transfer_time)
+        if spec_decode_draft_acceptance_rate := data.get(MetricNames.SPEC_DECODE_DRAFT_ACCEPTANCE_RATE):
+            self.spec_decode_draft_acceptance_rate.observe(spec_decode_draft_acceptance_rate)
+        if spec_decode_accepted_tokens := data.get(MetricNames.SPEC_DECODE_ACCEPTED_TOKENS, 0):
+            self.spec_decode_num_accepted_tokens.inc(spec_decode_accepted_tokens)
+        if spec_decode_draft_tokens := data.get(MetricNames.SPEC_DECODE_DRAFT_TOKENS, 0):
+            self.spec_decode_num_draft_tokens.inc(spec_decode_draft_tokens)
         self.last_log_time = time.time()
 
     def log_metrics_dict(self, metrics_dict: dict[str, float]) -> None:

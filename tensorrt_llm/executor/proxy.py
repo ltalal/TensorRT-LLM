@@ -1,6 +1,7 @@
 import atexit
 import concurrent.futures
 import threading
+import json
 import time
 import weakref
 from typing import Dict, Optional, Union
@@ -101,6 +102,7 @@ class GenerationExecutorProxy(GenerationExecutor):
         self.dispatch_stats_thread: Optional[ManagedThread] = None
         self.dispatch_kv_cache_events_thread: Optional[ManagedThread] = None
         self._start_executor_workers(worker_kwargs)
+        self._latest_stats = None
 
         # MPI registers its joiner using threading._register_atexit if possible.
         # These functions run before atexit.register, so to avoid deadlock,
@@ -207,7 +209,8 @@ class GenerationExecutorProxy(GenerationExecutor):
     def _iteration_result_task(self,
                                queue: Union[FusedIpcQueue, IntraProcessQueue],
                                result_singleton: IterationResult,
-                               urgent: bool = False) -> bool:
+                               urgent: bool = False,
+                               save_latest: bool = False) -> bool:
         if not urgent:
             time.sleep(0.2)
 
@@ -228,6 +231,9 @@ class GenerationExecutorProxy(GenerationExecutor):
 
         while queue.full():
             queue.get()
+
+        if len(data) > 0 and save_latest:
+            self._latest_stats = data[-1]
 
         try:
             for d in data:
@@ -263,7 +269,8 @@ class GenerationExecutorProxy(GenerationExecutor):
                 f"Skipping stats dispatch while self._iter_stats_result=None")
             return True  # Intended behavior, not an error
         return self._iteration_result_task(self.mp_stats_queue,
-                                           self._iter_stats_result)
+                                           self._iter_stats_result,
+                                           save_latest=True)
 
     def dispatch_kv_cache_events_task(self) -> bool:
         return self._iteration_result_task(self.kv_cache_events_queue,
