@@ -878,17 +878,23 @@ def _get_metrics_dict(
             req_perf_metrics = res.request_perf_metrics
         if req_perf_metrics and req_perf_metrics.timing_metrics:
             metrics_dict = {
-                RequestEventTiming.ARRIVAL_TIME:
-                req_perf_metrics.timing_metrics.arrival_time.total_seconds(),
-                RequestEventTiming.FIRST_TOKEN_TIME:
-                req_perf_metrics.timing_metrics.first_token_time.total_seconds(
-                ),
-                RequestEventTiming.FIRST_SCHEDULED_TIME:
-                req_perf_metrics.timing_metrics.first_scheduled_time.
-                total_seconds(),
-                RequestEventTiming.LAST_TOKEN_TIME:
-                req_perf_metrics.timing_metrics.last_token_time.total_seconds()
+                RequestEventTiming.ARRIVAL_TIME: req_perf_metrics.timing_metrics.arrival_time.total_seconds(),
+                RequestEventTiming.FIRST_TOKEN_TIME: req_perf_metrics.timing_metrics.first_token_time.total_seconds(),
+                RequestEventTiming.FIRST_SCHEDULED_TIME: req_perf_metrics.timing_metrics.first_scheduled_time.total_seconds(),
+                RequestEventTiming.LAST_TOKEN_TIME: req_perf_metrics.timing_metrics.last_token_time.total_seconds(),
+                RequestEventTiming.KV_CACHE_TRANSFER_START: req_perf_metrics.timing_metrics.kv_cache_transfer_start.total_seconds(),
+                RequestEventTiming.KV_CACHE_TRANSFER_END: req_perf_metrics.timing_metrics.kv_cache_transfer_end.total_seconds()
             }
+        if req_perf_metrics and req_perf_metrics.kv_cache_metrics:
+           if "kv_cache_hit_rate" not in metrics_dict:
+               metrics_dict["kv_cache_hit_rate"] = req_perf_metrics.kv_cache_metrics.kv_cache_hit_rate
+        if req_perf_metrics and req_perf_metrics.speculative_decoding:
+           spec_metrics = req_perf_metrics.speculative_decoding
+           metrics_dict.update({
+               "spec_decode_acceptance_rate": spec_metrics.acceptance_rate,
+               "spec_decode_total_accepted_draft_tokens": spec_metrics.total_accepted_draft_tokens,
+               "spec_decode_total_draft_tokens": spec_metrics.total_draft_tokens
+           })
     return metrics_dict
 
 

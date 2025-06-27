@@ -986,10 +986,22 @@ def _process_req_perf_metrics(
         MetricNames.E2E: e2e,
         MetricNames.REQUEST_QUEUE_TIME: request_queue_time
     }
+    if kv_cache_hit_rate := req_perf_metrics_dict.get("kv_cache_hit_rate"):
+        stat[MetricNames.GPU_PREFIX_CACHE_HIT_RATE] = kv_cache_hit_rate
+    kv_cache_transfer_time = req_perf_metrics_dict.get(RequestEventTiming.KV_CACHE_TRANSFER_END, 0) - \
+                            req_perf_metrics_dict.get(RequestEventTiming.KV_CACHE_TRANSFER_START, 0)
+    if kv_cache_transfer_time > 0:
+        stat[MetricNames.KV_CACHE_TRANSFER_TIME] = kv_cache_transfer_time
     if output_length > 1 and not is_multiple_response:
         tpot = (req_perf_metrics_dict.get(
             RequestEventTiming.LAST_TOKEN_TIME, 0) - req_perf_metrics_dict.get(
                 RequestEventTiming.FIRST_TOKEN_TIME, 0)) / (output_length - 1)
         stat.update({MetricNames.TPOT: tpot})
+    if spec_decode_acceptance_rate := req_perf_metrics_dict.get("acceptance_rate"):
+        stat[MetricNames.SPEC_DECODE_DRAFT_ACCEPTANCE_RATE] = spec_decode_acceptance_rate
+    if spec_decode_accepted_tokens := req_perf_metrics_dict.get("total_accepted_draft_tokens", 0):
+        stat[MetricNames.SPEC_DECODE_ACCEPTED_TOKENS] = spec_decode_accepted_tokens
+    if spec_decode_draft_tokens := req_perf_metrics_dict.get("total_draft_tokens", 0):
+        stat[MetricNames.SPEC_DECODE_DRAFT_TOKENS] = spec_decode_draft_tokens
     stat = dict(filter(lambda item: item[1] > 0, stat.items()))
     return stat
