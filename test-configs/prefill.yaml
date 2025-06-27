@@ -1,0 +1,23 @@
+kv_cache_config:
+  free_gpu_memory_fraction: 0.8
+  # host_cache_size: 107374182400
+  # secondary_offload_min_priority: 0
+  max_tokens: 65536
+  enable_block_reuse: true
+  event_buffer_max_size: 1000
+moe_config:
+  backend: TRTLLM
+enable_iter_perf_stats: true
+enable_iter_req_stats: true
+return_perf_metrics: true
+max_seq_len: 32768
+max_num_tokens: 32768
+max_batch_size: 1
+cuda_graph_config:
+  max_batch_size: 1
+  enable_padding: false
+cache_transceiver_config:
+  backend: DEFAULT
+  max_tokens_in_buffer: 32768
+disable_overlap_scheduler: true
+
