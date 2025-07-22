@@ -1,5 +1,3 @@
-# See https://confluence.nvidia.com/display/PRODSEC/AllowList for usage patterns.
-
 version = "1.0.0"
 
 [[pulse-trufflehog.files]]
