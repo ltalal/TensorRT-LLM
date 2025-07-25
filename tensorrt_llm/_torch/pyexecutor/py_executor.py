@@ -35,7 +35,7 @@ from .llm_request import (ExecutorRequest, LlmRequest, LlmRequestState,
                           LlmResponse)
 from .model_engine import ModelEngine
 from .sampler import Sampler, SampleState, SampleStateTensors
-from .scheduler import ScheduledRequests
+from .scheduler import RequestScheduler, ScheduledRequests
 from collections import defaultdict
 import array
 import json
