@@ -77,9 +77,10 @@ def _signal_handler_cleanup_child(signum, frame):
 
 def get_llm_args(
         model: str,
-        tokenizer: Optional[str] = None,
-        backend: str = "pytorch",
-        max_beam_width: int = BuildConfig.model_fields["max_beam_width"].
+        served_model_name: Optional[str] = None,
+                 tokenizer: Optional[str] = None,
+                 backend: str = "pytorch",
+                 max_beam_width: int = BuildConfig.model_fields["max_beam_width"].
     default,
         max_batch_size: int = BuildConfig.model_fields["max_batch_size"].
     default,
@@ -120,6 +121,8 @@ def get_llm_args(
     )
     llm_args = {
         "model": model,
+        "served_model_name":
+        served_model_name,
         "scheduler_config": scheduler_config,
         "tokenizer": tokenizer,
         "tensor_parallel_size": tensor_parallel_size,
@@ -157,7 +160,7 @@ def launch_server(
         multimodal_server_config: Optional[MultimodalServerConfig] = None):
 
     backend = llm_args["backend"]
-    model = llm_args["model"]
+    model = llm_args.pop("served_model_name") or llm_args["model"]
     if backend == 'pytorch':
         llm = PyTorchLLM(**llm_args)
     elif backend == '_autodeploy':
@@ -228,6 +231,7 @@ class ChoiceWithAlias(click.Choice):
 
 @click.command("serve")
 @click.argument("model", type=str)
+@click.option("--served_model_name", type=str, default=None, help="The model name used in the API.")
 @click.option("--tokenizer",
               type=str,
               default=None,
@@ -355,7 +359,7 @@ class ChoiceWithAlias(click.Choice):
               default=None,
               help="Keyword arguments for media I/O.")
 def serve(
-        model: str, tokenizer: Optional[str], host: str, port: int,
+        model: str, served_model_name: Optional[str], tokenizer: Optional[str], host: str, port: int,
         log_level: str, backend: str, max_beam_width: int, max_batch_size: int,
         max_num_tokens: int, max_seq_len: int, tp_size: int, pp_size: int,
         ep_size: Optional[int], cluster_size: Optional[int],
@@ -375,6 +379,7 @@ def serve(
 
     llm_args, _ = get_llm_args(
         model=model,
+        served_model_name=served_model_name,
         tokenizer=tokenizer,
         backend=backend,
         max_beam_width=max_beam_width,
