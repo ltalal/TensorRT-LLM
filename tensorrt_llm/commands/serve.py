@@ -88,9 +88,9 @@ def _signal_handler_cleanup_child(signum, frame):
 
 def get_llm_args(
         model: str,
+        served_model_name: Optional[str] = None,
         tokenizer: Optional[str] = None,
-        custom_tokenizer: Optional[str] = None,
-        backend: str = "pytorch",
+        custom_tokenizer: Optional[str] = None,backend: str = "pytorch",
         max_beam_width: int = BuildConfig.model_fields["max_beam_width"].
     default,
         max_batch_size: int = BuildConfig.model_fields["max_batch_size"].
@@ -143,6 +143,8 @@ def get_llm_args(
 
     llm_args = {
         "model": model,
+        "served_model_name":
+        served_model_name,
         "scheduler_config": scheduler_config,
         "tokenizer": tokenizer,
         "custom_tokenizer": custom_tokenizer,
@@ -185,7 +187,7 @@ def launch_server(
         multimodal_server_config: Optional[MultimodalServerConfig] = None):
 
     backend = llm_args["backend"]
-    model = llm_args["model"]
+    model = llm_args.pop("served_model_name") or llm_args["model"]
     addr_info = socket.getaddrinfo(host, port, socket.AF_UNSPEC,
                                    socket.SOCK_STREAM)
     address_family = socket.AF_INET6 if all(
@@ -392,6 +394,7 @@ class ChoiceWithAlias(click.Choice):
 
 @click.command("serve")
 @click.argument("model", type=str)
+@click.option("--served_model_name", type=str, default=None, help="The model name used in the API.")
 @click.option("--tokenizer",
               type=str,
               default=None,
@@ -601,7 +604,7 @@ class ChoiceWithAlias(click.Choice):
     help="Run gRPC server instead of OpenAI HTTP server. "
     "gRPC server accepts pre-tokenized requests and returns raw token IDs.")
 def serve(
-        model: str, tokenizer: Optional[str], custom_tokenizer: Optional[str],
+        model: str, served_model_name: Optional[str], tokenizer: Optional[str], custom_tokenizer: Optional[str],
         host: str, port: int, log_level: str, backend: str, max_beam_width: int,
         max_batch_size: int, max_num_tokens: int, max_seq_len: int,
         tensor_parallel_size: int, pipeline_parallel_size: int,
@@ -632,6 +635,7 @@ def serve(
             raise e
     llm_args, _ = get_llm_args(
         model=model,
+        served_model_name=served_model_name,
         tokenizer=tokenizer,
         custom_tokenizer=custom_tokenizer,
         backend=backend,
