@@ -98,8 +98,8 @@ def is_non_default_or_required(param_name, value, backend):
     2. Different from its default value in the backend's LlmArgs class
     """
     always_include = {
-        "model", "backend", "tokenizer", "custom_tokenizer",
-        "postprocess_tokenizer_dir"
+        "model", "served_model_name", "backend", "tokenizer",
+        "custom_tokenizer", "postprocess_tokenizer_dir"
     }
 
     if param_name in always_include:
@@ -130,15 +130,13 @@ def is_non_default_or_required(param_name, value, backend):
 
 def get_llm_args(
         model: str,
+        served_model_name: Optional[str] = None,
         tokenizer: Optional[str] = None,
         custom_tokenizer: Optional[str] = None,
         backend: str = "pytorch",
-        max_beam_width: int = BuildConfig.model_fields["max_beam_width"].
-    default,
-        max_batch_size: int = BuildConfig.model_fields["max_batch_size"].
-    default,
-        max_num_tokens: int = BuildConfig.model_fields["max_num_tokens"].
-    default,
+        max_beam_width: int = BuildConfig.model_fields["max_beam_width"].default,
+        max_batch_size: int = BuildConfig.model_fields["max_batch_size"].default,
+        max_num_tokens: int = BuildConfig.model_fields["max_num_tokens"].default,
         max_seq_len: int = BuildConfig.model_fields["max_seq_len"].default,
         tensor_parallel_size: int = 1,
         pipeline_parallel_size: int = 1,
@@ -175,21 +173,16 @@ def get_llm_args(
         'free_gpu_memory_fraction'].default
 
     cli_maybe_overrides = {
-        "model":
-        model,
-        "backend":
-        backend,
-        "tokenizer":
-        tokenizer,
-        "custom_tokenizer":
-        custom_tokenizer,
-        "postprocess_tokenizer_dir":
-        tokenizer or model,
+        "model": model,
+        "served_model_name": served_model_name,
+        "backend": backend,
+        "tokenizer": tokenizer,
+        "custom_tokenizer": custom_tokenizer,
+        "postprocess_tokenizer_dir": tokenizer or model,
         "kv_cache_config":
         KvCacheConfig(free_gpu_memory_fraction=free_gpu_memory_fraction)
         if free_gpu_memory_fraction != kv_cache_default_fraction else None,
-        "cp_config":
-        cp_config,
+        "cp_config": cp_config,
         "build_config":
         BuildConfig(max_batch_size=max_batch_size,
                     max_num_tokens=max_num_tokens,
@@ -203,36 +196,21 @@ def get_llm_args(
                             enable_max_num_tokens_tuning=False,
                             dynamic_batch_moving_average_window=128))
         if backend == "tensorrt" else None,
-        "max_batch_size":
-        max_batch_size,
-        "max_beam_width":
-        max_beam_width,
-        "tensor_parallel_size":
-        tensor_parallel_size,
-        "pipeline_parallel_size":
-        pipeline_parallel_size,
-        "context_parallel_size":
-        context_parallel_size,
-        "moe_expert_parallel_size":
-        moe_expert_parallel_size,
-        "gpus_per_node":
-        gpus_per_node,
-        "trust_remote_code":
-        trust_remote_code,
-        "max_num_tokens":
-        max_num_tokens,
-        "max_seq_len":
-        max_seq_len,
-        "num_postprocess_workers":
-        num_postprocess_workers,
-        "enable_chunked_prefill":
-        enable_chunked_prefill,
-        "revision":
-        revision,
-        "reasoning_parser":
-        reasoning_parser,
-        "otlp_traces_endpoint":
-        otlp_traces_endpoint,
+        "max_batch_size": max_batch_size,
+        "max_beam_width": max_beam_width,
+        "tensor_parallel_size": tensor_parallel_size,
+        "pipeline_parallel_size": pipeline_parallel_size,
+        "context_parallel_size": context_parallel_size,
+        "moe_expert_parallel_size": moe_expert_parallel_size,
+        "gpus_per_node": gpus_per_node,
+        "trust_remote_code": trust_remote_code,
+        "max_num_tokens": max_num_tokens,
+        "max_seq_len": max_seq_len,
+        "num_postprocess_workers": num_postprocess_workers,
+        "enable_chunked_prefill": enable_chunked_prefill,
+        "revision": revision,
+        "reasoning_parser": reasoning_parser,
+        "otlp_traces_endpoint": otlp_traces_endpoint,
         "fail_fast_on_attention_window_too_large":
         fail_fast_on_attention_window_too_large,
     }
@@ -258,7 +236,7 @@ def launch_server(
         multimodal_server_config: Optional[MultimodalServerConfig] = None):
 
     backend = llm_args["backend"]
-    model = llm_args["model"]
+    model = llm_args.pop("served_model_name") or llm_args["model"]
     addr_info = socket.getaddrinfo(host, port, socket.AF_UNSPEC,
                                    socket.SOCK_STREAM)
     address_family = socket.AF_INET6 if all(
@@ -504,6 +482,7 @@ class ChoiceWithAlias(click.Choice):
 
 @click.command("serve")
 @click.argument("model", type=str)
+@click.option("--served_model_name", type=str, default=None, help="The model name used in the API.")
 @click.option("--tokenizer",
               type=str,
               default=None,
@@ -719,7 +698,7 @@ class ChoiceWithAlias(click.Choice):
                   "Path to a YAML file with extra VISUAL_GEN model options.",
                   "prototype"))
 def serve(
-        model: str, tokenizer: Optional[str], custom_tokenizer: Optional[str],
+        model: str, served_model_name: Optional[str], tokenizer: Optional[str], custom_tokenizer: Optional[str],
         host: str, port: int, log_level: str, backend: str, max_beam_width: int,
         max_batch_size: int, max_num_tokens: int, max_seq_len: int,
         tensor_parallel_size: int, pipeline_parallel_size: int,
@@ -748,11 +727,11 @@ def serve(
             logger.error(
                 f"Failed to import custom module from {custom_module_dir}: {e}")
             raise e
-
     def _serve_llm():
         nonlocal server_role
         llm_args, _ = get_llm_args(
             model=model,
+            served_model_name=served_model_name,
             tokenizer=tokenizer,
             custom_tokenizer=custom_tokenizer,
             backend=backend,
