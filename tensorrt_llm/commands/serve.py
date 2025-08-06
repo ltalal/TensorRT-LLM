@@ -70,6 +70,7 @@ def _signal_handler_cleanup_child(signum, frame):
 
 
 def get_llm_args(model: str,
+                 served_model_name: Optional[str] = None,
                  tokenizer: Optional[str] = None,
                  backend: str = "pytorch",
                  max_beam_width: int = BuildConfig.max_beam_width,
@@ -112,6 +113,8 @@ def get_llm_args(model: str,
     llm_args = {
         "model":
         model,
+        "served_model_name":
+        served_model_name,
         "scheduler_config":
         scheduler_config,
         "tokenizer":
@@ -160,7 +163,7 @@ def launch_server(host: str,
                   server_role: Optional[ServerRole] = None):
 
     backend = llm_args["backend"]
-    model = llm_args["model"]
+    model = llm_args.pop("served_model_name") or llm_args["model"]
 
     if backend == 'pytorch':
         llm = PyTorchLLM(**llm_args)
@@ -177,6 +180,7 @@ def launch_server(host: str,
 
 @click.command("serve")
 @click.argument("model", type=str)
+@click.option("--served_model_name", type=str, default=None, help="The model name used in the API.")
 @click.option("--tokenizer",
               type=str,
               default=None,
@@ -285,7 +289,7 @@ def launch_server(host: str,
     help=
     "Exit with runtime error when attention window is too large to fit even a single sequence in the KV cache."
 )
-def serve(model: str, tokenizer: Optional[str], host: str, port: int,
+def serve(model: str, served_model_name: Optional[str], tokenizer: Optional[str], host: str, port: int,
           log_level: str, backend: str, max_beam_width: int,
           max_batch_size: int, max_num_tokens: int, max_seq_len: int,
           tp_size: int, pp_size: int, ep_size: Optional[int],
@@ -304,6 +308,7 @@ def serve(model: str, tokenizer: Optional[str], host: str, port: int,
 
     llm_args, _ = get_llm_args(
         model=model,
+        served_model_name=served_model_name,
         tokenizer=tokenizer,
         backend=backend,
         max_beam_width=max_beam_width,
