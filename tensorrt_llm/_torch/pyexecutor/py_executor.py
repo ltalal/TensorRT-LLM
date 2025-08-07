@@ -3,7 +3,7 @@ import datetime
 import functools
 import gc
 import os
-import pickle  # nosec B403
+import sys
 import threading
 import time
 import traceback
@@ -361,7 +361,8 @@ class PyExecutor:
         except Exception as e:
             logger.error(f"Error in event loop: {e}")
             logger.error(traceback.format_exc())
-            raise e
+            logger.critical("Exiting due to error in event loop.")
+            sys.exit(1)
         finally:
             self._executor_loop_cleanup()
 
