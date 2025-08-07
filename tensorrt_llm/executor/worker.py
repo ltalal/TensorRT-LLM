@@ -806,10 +806,10 @@ def worker_main(
                     elif isinstance(req, GenerationRequest):
                         try:
                             worker.submit(req)
-                        except RequestError as e:
+                        except Exception as e:
                             logger.error(f"submit request failed: {e}")
                             worker._await_response_helper.temp_error_responses.put(
-                                ErrorResponse(req.id, e, req.id))
+                                ErrorResponse(req.id, str(e), req.id))
                     else:
                         raise ValueError(f"Unknown request type: {type(req)}")
 
