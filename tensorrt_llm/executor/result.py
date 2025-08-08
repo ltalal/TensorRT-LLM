@@ -197,6 +197,24 @@ class GenerationResultBase:
     def context_logits(self) -> Optional[torch.Tensor]:
         return self._context_logits
 
+    def _tokens_trimmed_stop_sequence(self, output: CompletionOutput, use_tokens_diff: bool = False):
+        tokens = output.token_ids_diff if use_tokens_diff else output.token_ids
+
+        if not self._done:
+            return tokens
+
+        if output.finish_reason != 'stop':
+            return tokens
+
+        if self.sampling_params.include_stop_str_in_output:
+            return tokens
+
+        for stop_reason, stop_ids in self.sampling_params._get_stop_reasons_and_words():
+            if tokens[-len(stop_ids):] == stop_ids:
+                tokens = tokens[:-len(stop_ids)]
+                break
+        return tokens
+
     def _handle_sequence(self,
                          finish_reasons,
                          response_tensors,
@@ -255,8 +273,6 @@ class GenerationResultBase:
                 ):
                     if output.token_ids[-len(stop_ids):] == stop_ids:
                         output.stop_reason = stop_reason
-                        if not self.sampling_params.include_stop_str_in_output:
-                            output.token_ids = output.token_ids[:-len(stop_ids)]
                         break
             elif finish_reasons[src_idx] == tllm.FinishReason.LENGTH:
                 output.finish_reason = 'length'
@@ -383,16 +399,18 @@ class DetokenizedGenerationResultBase(GenerationResultBase):
                 if hasattr(
                         self.tokenizer, 'decode_incrementally'
                 ) and self._streaming and not self.sampling_params.use_beam_search:
+                    tokens_diff = self._tokens_trimmed_stop_sequence(beam_output, use_tokens_diff=True)
                     beam_output.text, beam_output._incremental_states = self.tokenizer.decode_incrementally(
-                        beam_output.token_ids_diff,
+                        tokens_diff,
                         prev_text=beam_output.text,
                         states=beam_output._incremental_states,
                         flush=self._done,
                         stream_interval=self.sampling_params._stream_interval,
                         **kwargs)
                 else:
+                    tokens = self._tokens_trimmed_stop_sequence(beam_output)
                     beam_output.text = self.tokenizer.decode(
-                        beam_output.token_ids, **kwargs)
+                        tokens, **kwargs)
 
                 is_generating = not self._done
                 is_finished_with_stop_or_length = (
