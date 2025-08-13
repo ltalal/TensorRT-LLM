@@ -289,14 +289,16 @@ class OpenAIServer:
                         for choice in pp_res.choices:
                             if choice.finish_reason is not None:
                                 did_complete = True
-                                prom_metrics["request_completed_total"] += 1
+                                # TODO this looks strange, sum(request_success_total) can be higher than total number of requests
                                 prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
 
                         yield pp_res
                 yield "data: [DONE]\n\n"
                 nvtx_mark("generation ends")
             finally:
-                if not did_complete:
+                if did_complete:
+                    prom_metrics["request_completed_total"] += 1
+                else:
                     prom_metrics["request_cancelled_total"] += 1
 
         async def create_chat_response(
@@ -310,8 +312,10 @@ class OpenAIServer:
 
             for choice in chat_response.choices:
                 if choice.finish_reason is not None:
-                    prom_metrics["request_completed_total"] += 1
+                    # TODO this looks strange, sum(request_success_total) can be higher than total number of requests
                     prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
+
+            prom_metrics["request_completed_total"] += 1
 
             # Add prompt_tokens_ids to the response
             if disaggregated_params and disaggregated_params.request_type and disaggregated_params.request_type == "context_only":
@@ -419,7 +423,7 @@ class OpenAIServer:
             for rsp in responses:
                 for choice in rsp.choices:
                     if choice.finish_reason is not None:
-                        prom_metrics["request_completed_total"] += 1
+                        # TODO this looks strange, sum(request_success_total) can be higher than total number of requests
                         prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
 
                 choices, usage = rsp.choices, rsp.usage
@@ -429,6 +433,8 @@ class OpenAIServer:
                 # Aggregate prompt token ids for context-only requests
                 if rsp.prompt_token_ids is not None:
                     all_prompt_token_ids.append(rsp.prompt_token_ids)
+
+            prom_metrics["request_completed_total"] += 1
 
             usage_info = UsageInfo(
                 prompt_tokens=num_prompt_tokens,
@@ -478,13 +484,15 @@ class OpenAIServer:
                     for choice in output.choices:
                         if choice.finish_reason is not None:
                             did_complete = True
-                            prom_metrics["request_completed_total"] += 1
+                            # TODO this looks strange, sum(request_success_total) can be higher than total number of requests
                             prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
 
                     yield output
                 yield "data: [DONE]\n\n"
             finally:
-                if not did_complete:
+                if did_complete:
+                    prom_metrics["request_completed_total"] += 1
+                else:
                     prom_metrics["request_cancelled_total"] += 1
 
         prom_metrics["request_started_total"] += 1
@@ -540,7 +548,7 @@ class OpenAIServer:
             else:
                 rsps = await asyncio.gather(*[completion_response(promise, params)
                                               for promise, params in zip(promises, postproc_params_collection)])
-                response = merge_completion_responses(rsps) if len(rsps) > 1 else rsps[0]
+                response = merge_completion_responses(rsps)
                 return JSONResponse(content=response.model_dump())
         except CppExecutorError:
             logger.error(traceback.format_exc())
