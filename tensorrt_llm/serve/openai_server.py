@@ -279,14 +279,25 @@ class OpenAIServer:
 
         async def chat_stream_generator(
                 promise: RequestOutput, postproc_params: PostprocParams) -> AsyncGenerator[str, None]:
+            did_complete = False
             if not self.postproc_worker_enabled:
                 post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
-            async for res in promise:
-                pp_results = res.outputs[0]._postprocess_result if self.postproc_worker_enabled else post_processor(res, args)
-                for pp_res in pp_results:
-                    yield pp_res
-            yield "data: [DONE]\n\n"
-            nvtx_mark("generation ends")
+            try:
+                async for res in promise:
+                    pp_results = res.outputs[0]._postprocess_result if self.postproc_worker_enabled else post_processor(res, args)
+                    for pp_res in pp_results:
+                        for choice in pp_res.choices:
+                            if choice.finish_reason is not None:
+                                did_complete = True
+                                prom_metrics["request_completed_total"] += 1
+                                prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
+
+                        yield pp_res
+                yield "data: [DONE]\n\n"
+                nvtx_mark("generation ends")
+            finally:
+                if not did_complete:
+                    prom_metrics["request_cancelled_total"] += 1
 
         async def create_chat_response(
                 promise: RequestOutput, postproc_params: PostprocParams, disaggregated_params: Optional[LlmDisaggregatedParams] = None) -> ChatCompletionResponse:
@@ -307,6 +318,7 @@ class OpenAIServer:
                 chat_response.prompt_token_ids = promise.prompt_token_ids
             return chat_response
 
+        prom_metrics["request_started_total"] += 1
         try:
             check_multiple_response(request.n, self.llm.args.backend)
             conversation: List[ConversationMessage] = []
@@ -381,6 +393,7 @@ class OpenAIServer:
             # If internal executor error is raised, shutdown the server
             signal.raise_signal(signal.SIGINT)
         except Exception as e:
+            prom_metrics["request_failed_total"] += 1
             logger.error(traceback.format_exc())
             return self.create_error_response(str(e))
 
@@ -459,9 +472,20 @@ class OpenAIServer:
             await asyncio.gather(*tasks)
 
         async def generator_wrapper(generator: AsyncIterator[Any]):
-            async for output in generator:
-                yield output
-            yield "data: [DONE]\n\n"
+            did_complete = False
+            try:
+                async for output in generator:
+                    for choice in output.choices:
+                        if choice.finish_reason is not None:
+                            did_complete = True
+                            prom_metrics["request_completed_total"] += 1
+                            prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
+
+                    yield output
+                yield "data: [DONE]\n\n"
+            finally:
+                if not did_complete:
+                    prom_metrics["request_cancelled_total"] += 1
 
         prom_metrics["request_started_total"] += 1
         try:
@@ -523,6 +547,7 @@ class OpenAIServer:
             # If internal executor error is raised, shutdown the server
             signal.raise_signal(signal.SIGINT)
         except Exception as e:
+            prom_metrics["request_failed_total"] += 1
             logger.error(traceback.format_exc())
             return self.create_error_response(str(e))
 
