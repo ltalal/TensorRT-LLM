@@ -279,27 +279,17 @@ class OpenAIServer:
 
         async def chat_stream_generator(
                 promise: RequestOutput, postproc_params: PostprocParams) -> AsyncGenerator[str, None]:
-            did_complete = False
             if not self.postproc_worker_enabled:
                 post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
             try:
                 async for res in promise:
                     pp_results = res.outputs[0]._postprocess_result if self.postproc_worker_enabled else post_processor(res, args)
                     for pp_res in pp_results:
-                        for choice in pp_res.choices:
-                            if choice.finish_reason is not None:
-                                did_complete = True
-                                # TODO this looks strange, sum(request_success_total) can be higher than total number of requests
-                                prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
-
                         yield pp_res
                 yield "data: [DONE]\n\n"
                 nvtx_mark("generation ends")
             finally:
-                if did_complete:
-                    prom_metrics["request_completed_total"] += 1
-                else:
-                    prom_metrics["request_cancelled_total"] += 1
+                prom_metrics["request_completed_total"] += 1
 
         async def create_chat_response(
                 promise: RequestOutput, postproc_params: PostprocParams, disaggregated_params: Optional[LlmDisaggregatedParams] = None) -> ChatCompletionResponse:
@@ -309,11 +299,6 @@ class OpenAIServer:
             else:
                 post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
                 chat_response = post_processor(promise, args)
-
-            for choice in chat_response.choices:
-                if choice.finish_reason is not None:
-                    # TODO this looks strange, sum(request_success_total) can be higher than total number of requests
-                    prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
 
             prom_metrics["request_completed_total"] += 1
 
@@ -421,11 +406,6 @@ class OpenAIServer:
             all_prompt_token_ids: List[List[int]] = []
             num_prompt_tokens = num_gen_tokens = 0
             for rsp in responses:
-                for choice in rsp.choices:
-                    if choice.finish_reason is not None:
-                        # TODO this looks strange, sum(request_success_total) can be higher than total number of requests
-                        prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
-
                 choices, usage = rsp.choices, rsp.usage
                 all_choices.extend(choices)
                 num_prompt_tokens += usage.prompt_tokens
@@ -478,22 +458,12 @@ class OpenAIServer:
             await asyncio.gather(*tasks)
 
         async def generator_wrapper(generator: AsyncIterator[Any]):
-            did_complete = False
             try:
                 async for output in generator:
-                    for choice in output.choices:
-                        if choice.finish_reason is not None:
-                            did_complete = True
-                            # TODO this looks strange, sum(request_success_total) can be higher than total number of requests
-                            prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
-
                     yield output
                 yield "data: [DONE]\n\n"
             finally:
-                if did_complete:
-                    prom_metrics["request_completed_total"] += 1
-                else:
-                    prom_metrics["request_cancelled_total"] += 1
+                prom_metrics["request_completed_total"] += 1
 
         prom_metrics["request_started_total"] += 1
         try:
