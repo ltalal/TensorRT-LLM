@@ -1,0 +1,2 @@
+cr.us-central1.nebius.cloud/u00kc13aqwwd4envj2/tensorrt_llm
+cr.us-central1.nebius.cloud/u00htn11daycbv4s97/tensorrt_llm
