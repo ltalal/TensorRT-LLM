@@ -38,3 +38,5 @@ RUN if [ -s /patch.txt ]; then \
     fi
 
 WORKDIR /app/tensorrt_llm
+
+RUN pip install nixl
