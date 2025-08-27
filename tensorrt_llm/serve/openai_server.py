@@ -422,7 +422,7 @@ class OpenAIServer:
             logger.error(traceback.format_exc())
             # If internal executor error is raised, shutdown the server
             signal.raise_signal(signal.SIGINT)
-        except Exception as e:
+        except BaseException as e:
             prom_metrics["request_failed_total"] += 1
             logger.error(traceback.format_exc())
             return self.create_error_response(str(e))
@@ -569,7 +569,7 @@ class OpenAIServer:
             logger.error(traceback.format_exc())
             # If internal executor error is raised, shutdown the server
             signal.raise_signal(signal.SIGINT)
-        except Exception as e:
+        except BaseException as e:
             prom_metrics["request_failed_total"] += 1
             logger.error(traceback.format_exc())
             return self.create_error_response(str(e))
