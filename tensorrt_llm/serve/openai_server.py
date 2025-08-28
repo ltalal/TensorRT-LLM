@@ -100,8 +100,8 @@ class OpenAIServer:
         if self.llm.args.return_perf_metrics:
             set_prometheus_multiproc_dir()
             self.metrics_collector = MetricsCollector({
-                "model_name": "undefined",
-                "engine_type": "undefined"
+                "model_name": self.model,
+                "engine_type": "tensorrt_llm"
             })
 
         @asynccontextmanager
