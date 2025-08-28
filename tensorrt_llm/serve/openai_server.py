@@ -200,7 +200,12 @@ class OpenAIServer:
             registry=registry,
         ).add().instrument(self.app).expose(self.app)
         metrics_app = make_asgi_app(registry=registry)
-        metrics_route = Mount("/prometheus/metrics", metrics_app)
+
+        async def metrics_wrapper(scope, receive, send):
+            await self.read_metrics_file()
+            await metrics_app(scope, receive, send)
+
+        metrics_route = Mount("/prometheus/metrics", metrics_wrapper)
         metrics_route.path_regex = re.compile("^/prometheus/metrics(?P<path>.*)$")
         self.app.routes.append(metrics_route)
 
