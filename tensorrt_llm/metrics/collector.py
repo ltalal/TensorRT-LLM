@@ -11,7 +11,7 @@ class MetricsCollector:
     labelname_finish_reason = "finished_reason"
 
     def __init__(self, labels: Dict[str, str]) -> None:
-        from prometheus_client import Counter, Histogram
+        from prometheus_client import Counter, Histogram, Gauge
         self.last_log_time = time.time()
         self.labels = labels
 
@@ -22,6 +22,18 @@ class MetricsCollector:
             **self.labels,
             **self.finish_reason_label
         }
+
+        self.num_requests_running = Gauge(
+            name="pytrtllm:num_requests_running",
+            documentation="Number of requests currently being processed.",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.num_requests_waiting = Gauge(
+            name="pytrtllm:num_requests_waiting",
+            documentation="Number of requests currently being processed.",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
 
         self.counter_request_success = Counter(
             name="request_success_total",

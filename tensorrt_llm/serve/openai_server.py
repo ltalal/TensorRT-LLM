@@ -271,11 +271,15 @@ class OpenAIServer:
         # NOTE: metrics do not update if the other thread is not running any requests.
         # Make sure to zero out running and waiting in this case.
         if prom_metrics["request_started_total"] == all_requests_done:
-            prom_metrics["num_requests_running"] = 0
+            prom_metrics["num_requests_waiting"] = prom_metrics["num_requests_running"] = 0
+        else:
+            # Detect number of requests not being processed by the TensorRT-LLM engine.
+            prom_metrics["num_requests_waiting"] = max(0, prom_metrics["request_started_total"] - (
+                    prom_metrics["num_requests_running"] + all_requests_done))
 
-        # Detect number of requests not being processed by the TensorRT-LLM engine.
-        prom_metrics["num_requests_waiting"] = max(0, prom_metrics["request_started_total"] - (
-                prom_metrics["num_requests_running"] + all_requests_done))
+        if self.metrics_collector:
+            self.metrics_collector.num_requests_running.set(prom_metrics["num_requests_running"])
+            self.metrics_collector.num_requests_waiting.set(prom_metrics["num_requests_waiting"])
 
         resp = ''
         for metric_key, metric_val in prom_metrics.items():
