@@ -247,11 +247,23 @@ class OpenAIServer:
 
     async def metrics(self) -> Response:
         global prom_metrics_file
+        await self.read_metrics_file()
+
+        # TODO reroute to /prometheus/metrics if enabled
+
+        resp = ''
+        for metric_key, metric_val in prom_metrics.items():
+            separator = ',' if '{' in metric_key else '{'
+            resp += f'pytrtllm:{metric_key}{separator}model_name="{self.model}"}} {float(metric_val)}\n'
+        return Response(status_code=200, content=resp)
+
+    async def read_metrics_file(self):
+        global prom_metrics_file
         bufs = None
         try:
             if prom_metrics_file is None:
                 prom_metrics_file = os.open(PROM_METRICS_FILENAME,
-                                            os.O_RDWR|os.O_CREAT|os.O_TRUNC)
+                                            os.O_RDWR | os.O_CREAT | os.O_TRUNC)
             bufs = os.pread(prom_metrics_file, 65536, 0).split(b'\0', 1)
             if len(bufs) >= 2:
                 keybuf, valbuf = bufs
@@ -263,11 +275,10 @@ class OpenAIServer:
         except:
             print(bufs)
             traceback.print_exc()
-
         all_requests_done = (
-                prom_metrics["request_completed_total"] +
-                prom_metrics["request_cancelled_total"] +
-                prom_metrics["request_failed_total"])
+            prom_metrics["request_completed_total"] +
+            prom_metrics["request_cancelled_total"] +
+            prom_metrics["request_failed_total"])
         # NOTE: metrics do not update if the other thread is not running any requests.
         # Make sure to zero out running and waiting in this case.
         if prom_metrics["request_started_total"] == all_requests_done:
@@ -275,17 +286,10 @@ class OpenAIServer:
         else:
             # Detect number of requests not being processed by the TensorRT-LLM engine.
             prom_metrics["num_requests_waiting"] = max(0, prom_metrics["request_started_total"] - (
-                    prom_metrics["num_requests_running"] + all_requests_done))
-
+                prom_metrics["num_requests_running"] + all_requests_done))
         if self.metrics_collector:
             self.metrics_collector.num_requests_running.set(prom_metrics["num_requests_running"])
             self.metrics_collector.num_requests_waiting.set(prom_metrics["num_requests_waiting"])
-
-        resp = ''
-        for metric_key, metric_val in prom_metrics.items():
-            separator = ',' if '{' in metric_key else '{'
-            resp += f'pytrtllm:{metric_key}{separator}model_name="{self.model}"}} {float(metric_val)}\n'
-        return Response(status_code=200, content=resp)
 
     async def get_model(self) -> JSONResponse:
         model_list = ModelList(data=[ModelCard(id=self.model)])
@@ -326,8 +330,7 @@ class OpenAIServer:
                     pp_results = res.outputs[0]._postprocess_result if self.postproc_worker_enabled else post_processor(res, args)
                     if res.finished and self.metrics_collector:
                         self.metrics_collector.log_metrics_dict(res.metrics_dict)
-                for pp_res in pp_results:
-
+                    for pp_res in pp_results:
                         yield pp_res
                 yield "data: [DONE]\n\n"
                 nvtx_mark("generation ends")
