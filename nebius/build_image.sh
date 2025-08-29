@@ -22,8 +22,11 @@ else
     exit 1
 fi
 
+commit_hash=$(git rev-parse --short HEAD)
+
 echo "TensorRT-LLM version: $trtllm_ver"
 echo "Nebius version: $nb_ver"
+echo "Commit hash: $commit_hash"
 
 # Make patch from current branch to tag "v$trtllm_ver", limited to tensorrt_llm directory
 echo "Creating patch from current branch to tag v$trtllm_ver for tensorrt_llm directory..."
@@ -37,7 +40,8 @@ echo "Applying patch:"
 cat patch.txt
 
 # Build Docker image
-built_image="$image:$trtllm_ver.$nb_ver"
+image_tag="$trtllm_ver.$nb_ver.$commit_hash"
+built_image="$image:$image_tag"
 echo "Building Docker image with BASE_IMAGE=$image:$trtllm_ver"
 docker build -t "$built_image" . --build-arg BASE_IMAGE="$image:$trtllm_ver" --platform=linux/amd64
 
@@ -60,7 +64,7 @@ while IFS= read -r result_image || [[ -n "$result_image" ]]; do
         continue
     fi
 
-    target_tag="$result_image:$trtllm_ver.$nb_ver"
+    target_tag="$result_image:$image_tag"
     echo "Tagging image as: $target_tag"
     docker tag "$built_image" "$target_tag"
 
