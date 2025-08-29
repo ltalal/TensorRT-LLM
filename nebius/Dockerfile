@@ -7,6 +7,8 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+RUN pip install nixl
+
 # Copy the main patch file
 COPY patch.txt /patch.txt
 WORKDIR /
@@ -38,5 +40,3 @@ RUN if [ -s /patch.txt ]; then \
     fi
 
 WORKDIR /app/tensorrt_llm
-
-RUN pip install nixl
