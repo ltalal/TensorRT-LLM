@@ -142,10 +142,6 @@ class MetricsCollector:
             self._log_histogram(self.histogram_gpu_prefix_cache_hit_rate, gpu_prefix_cache_hit_rate)
         if kv_cache_transfer_time := data.get(MetricNames.KV_CACHE_TRANSFER_TIME, 0):
             self._log_histogram(self.histogram_kv_cache_transfer_time, kv_cache_transfer_time)
-        if generation_tokens := data.get(MetricNames.GENERATION_TOKENS_TOTAL, 0):
-            self.counter_generation_tokens_total.labels(**self.labels).inc(generation_tokens)
-        if prompt_tokens := data.get(MetricNames.PROMPT_TOKENS_TOTAL, 0):
-            self.counter_prompt_tokens_total.labels(**self.labels).inc(prompt_tokens)
         self.last_log_time = time.time()
 
     def log_metrics_dict(self, metrics_dict: dict[str, float]) -> None:
