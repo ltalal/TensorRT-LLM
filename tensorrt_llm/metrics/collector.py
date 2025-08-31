@@ -78,6 +78,12 @@ class MetricsCollector:
             ],
             labelnames=self.labels.keys())
 
+        self.histogram_gpu_prefix_cache_hit_rate = Histogram(
+            name="gpu_prefix_cache_hit_rate",
+            documentation="Histogram of GPU prefix cache hit rate as a ratio (0.0 to 1.0).",
+            buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+            labelnames=self.labels.keys())
+
     def _label_merge(self, labels: Dict[str, str]) -> Dict[str, str]:
         if labels is None or len(labels) == 0:
             return self.labels
@@ -91,6 +97,10 @@ class MetricsCollector:
     def _log_histogram(self, histogram, data: Union[int, float]) -> None:
         # Convenience function for logging to histogram.
         histogram.labels(**self.labels).observe(data)
+
+    def _log_gauge(self, gauge, data: Union[int, float]) -> None:
+        # Convenience function for logging to gauge.
+        gauge.set(data)
 
     def log_request_success(self, data: Union[int, float],
                             labels: Dict[str, str]) -> None:
@@ -107,6 +117,8 @@ class MetricsCollector:
         if request_queue_time := data.get(MetricNames.REQUEST_QUEUE_TIME, 0):
             self._log_histogram(self.histogram_queue_time_request,
                                 request_queue_time)
+        if gpu_prefix_cache_hit_rate := data.get(MetricNames.GPU_PREFIX_CACHE_HIT_RATE):
+            self._log_histogram(self.histogram_gpu_prefix_cache_hit_rate, gpu_prefix_cache_hit_rate)
         self.last_log_time = time.time()
 
     def log_metrics_dict(self, metrics_dict: dict[str, float]) -> None:

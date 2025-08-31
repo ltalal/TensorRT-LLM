@@ -6,6 +6,7 @@ class MetricNames(Enum):
     TPOT = "tpot"
     E2E = "e2e"
     REQUEST_QUEUE_TIME = "request_queue_time"
+    GPU_PREFIX_CACHE_HIT_RATE = "gpu_prefix_cache_hit_rate"
 
 
 class RequestEventTiming(Enum):

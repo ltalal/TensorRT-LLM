@@ -1067,6 +1067,9 @@ def _get_metrics_dict(
                 RequestEventTiming.LAST_TOKEN_TIME:
                 req_perf_metrics.timing_metrics.last_token_time.total_seconds()
             }
+        if req_perf_metrics and req_perf_metrics.kv_cache_metrics:
+            if "kv_cache_hit_rate" not in metrics_dict:
+                metrics_dict["kv_cache_hit_rate"] = req_perf_metrics.kv_cache_metrics.kv_cache_hit_rate
     return metrics_dict
 
 

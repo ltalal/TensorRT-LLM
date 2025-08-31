@@ -776,6 +776,8 @@ def _process_req_perf_metrics(
         MetricNames.E2E: e2e,
         MetricNames.REQUEST_QUEUE_TIME: request_queue_time
     }
+    if kv_cache_hit_rate := req_perf_metrics_dict.get("kv_cache_hit_rate"):
+        stat[MetricNames.GPU_PREFIX_CACHE_HIT_RATE] = kv_cache_hit_rate
     if output_length > 1 and not is_multiple_response:
         tpot = (req_perf_metrics_dict.get(
             RequestEventTiming.LAST_TOKEN_TIME, 0) - req_perf_metrics_dict.get(
