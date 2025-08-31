@@ -84,6 +84,15 @@ class MetricsCollector:
             buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
             labelnames=self.labels.keys())
 
+        self.histogram_kv_cache_transfer_time = Histogram(
+            name="kv_cache_transfer_time_seconds",
+            documentation="Histogram of KV cache transfer time in seconds.",
+            buckets=[
+                0.001, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.1, 0.25, 0.5,
+                0.75, 1.0, 2.5, 5.0, 7.5, 10.0
+            ],
+            labelnames=self.labels.keys())
+
     def _label_merge(self, labels: Dict[str, str]) -> Dict[str, str]:
         if labels is None or len(labels) == 0:
             return self.labels
@@ -119,6 +128,8 @@ class MetricsCollector:
                                 request_queue_time)
         if gpu_prefix_cache_hit_rate := data.get(MetricNames.GPU_PREFIX_CACHE_HIT_RATE):
             self._log_histogram(self.histogram_gpu_prefix_cache_hit_rate, gpu_prefix_cache_hit_rate)
+        if kv_cache_transfer_time := data.get(MetricNames.KV_CACHE_TRANSFER_TIME, 0):
+            self._log_histogram(self.histogram_kv_cache_transfer_time, kv_cache_transfer_time)
         self.last_log_time = time.time()
 
     def log_metrics_dict(self, metrics_dict: dict[str, float]) -> None:

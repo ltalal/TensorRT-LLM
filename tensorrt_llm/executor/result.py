@@ -778,6 +778,10 @@ def _process_req_perf_metrics(
     }
     if kv_cache_hit_rate := req_perf_metrics_dict.get("kv_cache_hit_rate"):
         stat[MetricNames.GPU_PREFIX_CACHE_HIT_RATE] = kv_cache_hit_rate
+    kv_cache_transfer_time = req_perf_metrics_dict.get(RequestEventTiming.KV_CACHE_TRANSFER_END, 0) - \
+                            req_perf_metrics_dict.get(RequestEventTiming.KV_CACHE_TRANSFER_START, 0)
+    if kv_cache_transfer_time > 0:
+        stat[MetricNames.KV_CACHE_TRANSFER_TIME] = kv_cache_transfer_time
     if output_length > 1 and not is_multiple_response:
         tpot = (req_perf_metrics_dict.get(
             RequestEventTiming.LAST_TOKEN_TIME, 0) - req_perf_metrics_dict.get(
