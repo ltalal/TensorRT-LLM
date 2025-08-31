@@ -41,7 +41,7 @@ cat patch.txt
 
 # Build Docker image
 image_tag="$trtllm_ver.$nb_ver.$commit_hash"
-built_image="$image:$image_tag"
+built_image="$image:nb.dev"
 echo "Building Docker image with BASE_IMAGE=$image:$trtllm_ver"
 docker build -t "$built_image" . --build-arg BASE_IMAGE="$image:$trtllm_ver" --platform=linux/amd64
 
@@ -49,8 +49,6 @@ if [ $? -ne 0 ]; then
     echo "Error: Failed to build Docker image"
     exit 1
 fi
-
-export TRTLLM_IMAGE=$built_image
 
 # Check if images.txt exists
 IMAGE_LIST_FILE="images.txt"
