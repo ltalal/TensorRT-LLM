@@ -787,11 +787,11 @@ def _process_req_perf_metrics(
             RequestEventTiming.LAST_TOKEN_TIME, 0) - req_perf_metrics_dict.get(
                 RequestEventTiming.FIRST_TOKEN_TIME, 0)) / (output_length - 1)
         stat.update({MetricNames.TPOT: tpot})
-    if spec_decode_acceptance_rate := req_perf_metrics_dict.get("spec_decode_acceptance_rate"):
+    if spec_decode_acceptance_rate := req_perf_metrics_dict.get("acceptance_rate"):
         stat[MetricNames.SPEC_DECODE_DRAFT_ACCEPTANCE_RATE] = spec_decode_acceptance_rate
-    if spec_decode_accepted_tokens := req_perf_metrics_dict.get("spec_decode_total_accepted_draft_tokens", 0):
+    if spec_decode_accepted_tokens := req_perf_metrics_dict.get("total_accepted_draft_tokens", 0):
         stat[MetricNames.SPEC_DECODE_ACCEPTED_TOKENS] = spec_decode_accepted_tokens
-    if spec_decode_draft_tokens := req_perf_metrics_dict.get("spec_decode_total_draft_tokens", 0):
+    if spec_decode_draft_tokens := req_perf_metrics_dict.get("total_draft_tokens", 0):
         stat[MetricNames.SPEC_DECODE_DRAFT_TOKENS] = spec_decode_draft_tokens
     stat = dict(filter(lambda item: item[1] > 0, stat.items()))
     return stat
