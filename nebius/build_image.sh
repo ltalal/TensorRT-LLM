@@ -50,6 +50,8 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+export TRTLLM_IMAGE=$built_image
+
 # Check if images.txt exists
 IMAGE_LIST_FILE="images.txt"
 if [ ! -f "$IMAGE_LIST_FILE" ]; then
