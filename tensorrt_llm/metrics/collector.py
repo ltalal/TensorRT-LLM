@@ -24,13 +24,13 @@ class MetricsCollector:
         }
 
         self.num_requests_running = Gauge(
-            name="pytrtllm:num_requests_running",
+            name="num_requests_running",
             documentation="Number of requests currently being processed.",
             labelnames=self.labels.keys()
         ).labels(**self.labels)
 
         self.num_requests_waiting = Gauge(
-            name="pytrtllm:num_requests_waiting",
+            name="num_requests_waiting",
             documentation="Number of requests currently being processed.",
             labelnames=self.labels.keys()
         ).labels(**self.labels)
@@ -93,6 +93,18 @@ class MetricsCollector:
             ],
             labelnames=self.labels.keys())
 
+        self.counter_generation_tokens_total = Gauge(
+            name="generation_tokens_total",
+            documentation="Total number of generated tokens.",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.counter_prompt_tokens_total = Gauge(
+            name="prompt_tokens_total",
+            documentation="Total number of prompt tokens.",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
     def _label_merge(self, labels: Dict[str, str]) -> Dict[str, str]:
         if labels is None or len(labels) == 0:
             return self.labels
@@ -130,6 +142,10 @@ class MetricsCollector:
             self._log_histogram(self.histogram_gpu_prefix_cache_hit_rate, gpu_prefix_cache_hit_rate)
         if kv_cache_transfer_time := data.get(MetricNames.KV_CACHE_TRANSFER_TIME, 0):
             self._log_histogram(self.histogram_kv_cache_transfer_time, kv_cache_transfer_time)
+        if generation_tokens := data.get(MetricNames.GENERATION_TOKENS_TOTAL, 0):
+            self.counter_generation_tokens_total.labels(**self.labels).inc(generation_tokens)
+        if prompt_tokens := data.get(MetricNames.PROMPT_TOKENS_TOTAL, 0):
+            self.counter_prompt_tokens_total.labels(**self.labels).inc(prompt_tokens)
         self.last_log_time = time.time()
 
     def log_metrics_dict(self, metrics_dict: dict[str, float]) -> None:
