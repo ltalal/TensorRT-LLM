@@ -1074,6 +1074,13 @@ def _get_metrics_dict(
         if req_perf_metrics and req_perf_metrics.kv_cache_metrics:
             if "kv_cache_hit_rate" not in metrics_dict:
                 metrics_dict["kv_cache_hit_rate"] = req_perf_metrics.kv_cache_metrics.kv_cache_hit_rate
+        if req_perf_metrics and req_perf_metrics.speculative_decoding:
+            spec_metrics = req_perf_metrics.speculative_decoding
+            metrics_dict.update({
+                "spec_decode_acceptance_rate": spec_metrics.acceptance_rate,
+                "spec_decode_total_accepted_draft_tokens": spec_metrics.total_accepted_draft_tokens,
+                "spec_decode_total_draft_tokens": spec_metrics.total_draft_tokens
+            })
     return metrics_dict
 
 
