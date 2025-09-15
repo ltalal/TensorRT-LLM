@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import List, Literal, Optional, Tuple, Union
+import uuid
 
 from .._utils import nvtx_range_debug
 from ..executor import (DetokenizedGenerationResultBase, GenerationResult,
@@ -41,6 +42,7 @@ class ChatPostprocArgs(PostprocArgs):
     reasoning_parser: Optional[str] = None
     reasoning_parser_dict: dict[int, BaseReasoningParser] = field(
         default_factory=dict)
+    completion_id: Optional[str] = None
 
     @classmethod
     def from_request(cls, request: ChatCompletionRequest):
@@ -108,7 +110,7 @@ def chat_stream_post_processor(rsp: GenerationResultBase, args: ChatPostprocArgs
                                                              role=role,
                                                              content=content),
                                                          finish_reason=None)
-        chunk = ChatCompletionStreamResponse(choices=[choice_data],
+        chunk = ChatCompletionStreamResponse(id=args.completion_id, choices=[choice_data],
                                              model=args.model)
         if include_continuous_usage:
             chunk.usage = UsageInfo(prompt_tokens=num_tokens,
@@ -126,6 +128,10 @@ def chat_stream_post_processor(rsp: GenerationResultBase, args: ChatPostprocArgs
     else:
         include_usage = False
         include_continuous_usage = False
+    
+    # Generate completion ID once and reuse it for all chunks
+    if args.completion_id is None:
+        args.completion_id = f"chat-{str(uuid.uuid4().hex)}"
     if args.first_iteration:
         for i in range(args.num_choices):
             res.append(f"data: {yield_first_chat(prompt_tokens, i, role=args.role)} \n\n")
@@ -169,7 +175,7 @@ def chat_stream_post_processor(rsp: GenerationResultBase, args: ChatPostprocArgs
             choice.finish_reason = output.finish_reason
             choice.stop_reason = output.stop_reason
             finish_reason_sent[i] = True
-        chunk = ChatCompletionStreamResponse(choices=[choice], model=args.model)
+        chunk = ChatCompletionStreamResponse(id=args.completion_id, choices=[choice], model=args.model)
         if include_continuous_usage:
             chunk.usage = UsageInfo(prompt_tokens=prompt_tokens,
                                     completion_tokens=output.length,
@@ -187,7 +193,7 @@ def chat_stream_post_processor(rsp: GenerationResultBase, args: ChatPostprocArgs
         )
 
         final_usage_chunk = ChatCompletionStreamResponse(
-            choices=[], model=args.model, usage=final_usage)
+            id=args.completion_id, choices=[], model=args.model, usage=final_usage)
         final_usage_data = final_usage_chunk.model_dump_json()
         res.append(f"data: {final_usage_data}\n\n")
     return res
@@ -244,6 +250,7 @@ def chat_response_post_processor(rsp: GenerationResultBase, args: ChatPostprocAr
         total_tokens=num_prompt_tokens + num_generated_tokens,
     )
     response = ChatCompletionResponse(
+        id=args.completion_id,
         model=args.model,
         choices=choices,
         usage=usage,
@@ -260,6 +267,7 @@ class CompletionPostprocArgs(PostprocArgs):
     detokenize: bool = True
     prompt: Optional[str] = None
     stream_options: Optional[StreamOptions] = None
+    completion_id: Optional[str] = None
 
     @classmethod
     def from_request(cls, request: CompletionRequest):
@@ -282,6 +290,10 @@ def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase, args:
     else:
         include_usage = False
         include_continuous_usage = False
+    
+    # Generate completion ID once and reuse it for all chunks
+    if args.completion_id is None:
+        args.completion_id = f"cmpl-{str(uuid.uuid4().hex)}"
 
     for output in rsp.outputs:
         delta_text = output.text_diff
@@ -294,7 +306,7 @@ def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase, args:
             finish_reason = output.finish_reason,
             stop_reason = output.stop_reason,
         )
-        chunk = CompletionStreamResponse(model=args.model, choices=[choice])
+        chunk = CompletionStreamResponse(id=args.completion_id, model=args.model, choices=[choice])
         if include_continuous_usage:
             chunk.usage = UsageInfo(prompt_tokens=prompt_tokens,
                                     completion_tokens=output.length,
@@ -311,8 +323,8 @@ def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase, args:
             total_tokens=prompt_tokens + completion_tokens,
         )
 
-        final_usage_chunk = ChatCompletionStreamResponse(
-            choices=[], model=args.model, usage=final_usage)
+        final_usage_chunk = CompletionStreamResponse(
+            id=args.completion_id, choices=[], model=args.model, usage=final_usage)
         final_usage_data = final_usage_chunk.model_dump_json()
         res.append(f"data: {final_usage_data}\n\n")
     args.first_iteration = False
@@ -345,5 +357,5 @@ def completion_response_post_processor(rsp: GenerationResult, args: CompletionPo
     usage = UsageInfo(prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     total_tokens=completion_tokens + prompt_tokens)
-    response = CompletionResponse(choices=choices, model=args.model, usage=usage)
+    response = CompletionResponse(id=args.completion_id, choices=choices, model=args.model, usage=usage)
     return response

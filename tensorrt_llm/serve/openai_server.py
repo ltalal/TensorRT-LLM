@@ -3,6 +3,7 @@ import asyncio
 import os
 import signal
 import traceback
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from http import HTTPStatus
@@ -261,6 +262,8 @@ class OpenAIServer:
             if len(os.getenv("TRTLLM_KVCACHE_TIME_OUTPUT_PATH", "")) > 0:
                 sampling_params.return_perf_metrics = True
             postproc_args = ChatPostprocArgs.from_request(request)
+            # Generate a single completion ID for this chat request to use across all streaming chunks  
+            postproc_args.completion_id = f"chatcmpl-{str(uuid.uuid4().hex)}"
             disaggregated_params = to_llm_disaggregated_params(request.disaggregated_params)
 
             conversation, mm_coroutines, mm_placeholder_counts = parse_chat_messages_coroutines(request.messages, self.model_config)
@@ -358,6 +361,7 @@ class OpenAIServer:
                 total_tokens=num_gen_tokens + num_prompt_tokens,
             )
             merged_rsp = CompletionResponse(
+                id=responses[0].id,  # Use the ID from the first response
                 model=self.model,
                 choices=all_choices,
                 usage=usage_info,
@@ -416,9 +420,12 @@ class OpenAIServer:
             if len(os.getenv("TRTLLM_KVCACHE_TIME_OUTPUT_PATH", "")) > 0:
                 sampling_params.return_perf_metrics = True
             disaggregated_params = to_llm_disaggregated_params(request.disaggregated_params)
+            # Generate a single completion ID for this request to use across all streaming chunks
+            completion_id = f"cmpl-{str(uuid.uuid4().hex)}"
             for idx, prompt in enumerate(prompts):
                 postproc_args = CompletionPostprocArgs.from_request(request)
                 postproc_args.prompt_idx = idx
+                postproc_args.completion_id = completion_id
                 if request.echo:
                     postproc_args.prompt = prompt
                 postproc_params = PostprocParams(
