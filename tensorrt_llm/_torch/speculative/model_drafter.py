@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import traceback
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
@@ -69,6 +70,9 @@ class ModelDrafter(Drafter):
         self._request_draft_logits = False
         if isinstance(sampler, TorchSampler):
             self._request_draft_logits = sampler.enable_mixed_sampler
+
+        logger.info(f"ModelDrafter._request_draft_logits={self._request_draft_logits}")
+
         self.guided_decoder = guided_decoder
 
         self.use_static_draft_loop = draft_model_engine.model_is_wrapped
