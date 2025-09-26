@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import traceback
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
@@ -76,6 +77,8 @@ class ModelDrafter(Drafter):
             # TODO: enable sampling/guided decoding on static draft loop
             assert guided_decoder is None
             assert spec_config._allow_greedy_draft_tokens
+
+        logger.info(f"ModelDrafter.use_static_draft_loop={self.use_static_draft_loop}")
 
     def _create_draft_request(self, request: LlmRequest,
                               input_tokens: Optional[List]) -> LlmRequest:
