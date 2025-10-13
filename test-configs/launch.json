@@ -82,6 +82,16 @@
       "console": "integratedTerminal",
       "subProcess": true,
       "justMyCode": false
-    }
-  ]
+    },
+  ],
+  "compounds": [
+        {
+        "name": "Run disagg servers",
+        "configurations": [
+            "Run TRTLLM Serve Disagg Prefill (Llama 3.1 8B, TP=1)",
+            "Run TRTLLM Serve Disagg Decode (Llama 3.1 8B, TP=1)",
+            "Run TRTLLM Serve Disagg (Llama 3.1 8B, TP=1)",
+        ]
+        }
+    ]
 }

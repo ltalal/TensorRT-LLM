@@ -8,6 +8,7 @@ import time
 import weakref
 from pathlib import Path
 from typing import Any, List, Literal, Optional, Sequence, Union
+from dataclasses import dataclass
 
 from tqdm import tqdm
 from transformers import PreTrainedTokenizerBase
@@ -42,6 +43,34 @@ from .tokenizer import TokenizerBase, _xgrammar_tokenizer_info
 # TODO[chunweiy]: move the following symbols back to utils scope, and remove the following import
 from .utils import (append_docstring, exception_handler, get_device_count,
                     print_colored_debug, set_api_status)
+
+
+def _to_signed_i64(value: int | None) -> int | None:
+    """Convert a Python int to signed 64-bit range by two's complement."""
+    if value is None:
+        return None
+
+    if value >= 2**63:
+        return value - 2**64
+    if value < -(2**63):
+        return ((value + 2**63) % 2**64) - 2**63
+    return value
+
+
+@dataclass
+class KvPublishEvent:
+    event_id: int
+    token_ids: List[int]
+    num_block_tokens: List[int]
+    block_hashes: List[int]
+    lora_id: int
+    parent_hash: Optional[int] = None
+
+
+@dataclass
+class KvRemoveEvent:
+    event_id: int
+    block_hashes: List[int]
 
 
 class RequestOutput(DetokenizedGenerationResultBase, GenerationResult):
@@ -222,6 +251,88 @@ class BaseLLM:
 
         exception_handler.register(self, 'shutdown')
         atexit.register(LLM._shutdown_wrapper, weakref.ref(self))
+
+        self.partial_block_hashes = set()
+        self.max_window_size = None
+        self.kv_publish_events: List[KvPublishEvent] = []
+        self.kv_remove_events: List[KvRemoveEvent] = []
+
+    def update_max_window_size(self, event):
+        if "window_size" in event:
+            window_size = event["window_size"]
+            if self.max_window_size is None or window_size > self.max_window_size:
+                self.max_window_size = window_size
+                logger.debug(
+                    f"kv events max_window_size has been updated to {self.max_window_size}"
+                )
+
+    async def process_kv_event(self):
+        events = await self.get_kv_cache_events_async()
+        async for event in events:
+            event_id = event["event_id"]
+            data = event["data"]
+            if data["type"] == "stored":
+                self.processing_initial_created_events = False
+                parent_hash = _to_signed_i64(data["parent_hash"])
+                token_ids = []
+                num_block_tokens = []
+                block_hashes = []
+                for block in data["blocks"]:
+                    token_num_in_block = len(block["tokens"])
+                    block_hash = _to_signed_i64(block["block_hash"])
+                    if token_num_in_block > 128:
+                        logger.error(
+                            f"Block {block_hash} contains {token_num_in_block} tokens, which is greater than kv_block_size {self.kv_block_size}"
+                        )
+                        return
+                    if token_num_in_block < 128:
+                        logger.debug(
+                            f"Early stop when block {block_hash} containing {token_num_in_block} tokens not equal to kv_block_size {self.kv_block_size}"
+                        )
+                        self.partial_block_hashes.add(block_hash)
+                        break
+                    num_block_tokens.append(token_num_in_block)
+                    block_hashes.append(block_hash)
+                    for token in block["tokens"]:
+                        token_ids.append(int(token["token_id"]))
+
+                # Note: Currently data does not have lora_id.
+                # Using 0 as default value. If later data has
+                # lora_id, we need to verify if this is correct.
+                lora_id = data.get("lora_id", 0)
+
+                logger.debug(
+                    f"publish stored event: event_id: {event_id}, token_ids: {token_ids}, num_block_tokens: {num_block_tokens}, block_hashes: {block_hashes}, lora_id: {lora_id}, parent_hash: {parent_hash}"
+                )
+                self.kv_event_publisher.publish_stored(
+                    event_id,
+                    token_ids,
+                    num_block_tokens,
+                    block_hashes,
+                    lora_id,
+                    parent_hash,
+                )
+            elif data["type"] == "removed":
+                self.processing_initial_created_events = False
+                block_hashes = []
+                for block_hash in data["block_hashes"]:
+                    block_hash = _to_signed_i64(block_hash)
+                    if block_hash in self.partial_block_hashes:
+                        logger.debug(
+                            f"Skipping removing block hash {block_hash} since it is a partial block"
+                        )
+                        self.partial_block_hashes.remove(block_hash)
+                        continue
+                    block_hashes.append(block_hash)
+
+                logger.debug(
+                    f"publish removed event: event_id: {event_id}, block_hashes: {block_hashes}"
+                )
+                self.kv_event_publisher.publish_removed(event_id, block_hashes)
+            elif data["type"] == "created" and self.processing_initial_created_events:
+                self.update_max_window_size(event)
+
+        return True
 
     @property
     @set_api_status("beta")

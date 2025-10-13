@@ -419,6 +419,10 @@ class OpenAIServer:
         return JSONResponse(content=list(perf_metrics))
 
     async def get_kv_cache_events(self) -> JSONResponse:
+        events = await self._get_kv_cache_events()
+        return JSONResponse(content=events)
+
+    async def _get_kv_cache_events(self) -> JSONResponse:
         events = []
         try:
             async for event in self.llm.get_kv_cache_events_async(2):
@@ -426,7 +430,7 @@ class OpenAIServer:
         except IndexError:
             # queue is empty, no more events
             pass
-        return JSONResponse(content=events)
+        return events
 
     async def _extract_metrics(self, res: RequestOutput):
         if not res.finished:
