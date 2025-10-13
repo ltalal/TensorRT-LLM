@@ -291,7 +291,11 @@ class BaseLLM:
         return events
 
     async def get_kv_cache_usage(self) -> float:
-        events = await self._get_kv_cache_events()
+        try:
+            events = await self._get_kv_cache_events()
+        except AssertionError as e:
+            logger.warning(f"Error during getting kv cache events: {e}")
+            return 0.0
         for event in events:
             event_id = event["event_id"]
             data = event["data"]
