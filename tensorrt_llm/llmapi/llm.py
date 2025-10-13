@@ -45,6 +45,8 @@ from .utils import (append_docstring, exception_handler, get_device_count,
                     print_colored_debug, set_api_status)
 
 
+KV_BLOCK_SIZE = 128
+
 def _to_signed_i64(value: int | None) -> int | None:
     """Convert a Python int to signed 64-bit range by two's complement."""
     if value is None:
@@ -256,6 +258,7 @@ class BaseLLM:
         self.max_window_size = None
         self.kv_publish_events: List[KvPublishEvent] = []
         self.kv_remove_events: List[KvRemoveEvent] = []
+        self.processing_initial_created_events = True
 
     def update_max_window_size(self, event):
         if "window_size" in event:
@@ -266,9 +269,19 @@ class BaseLLM:
                     f"kv events max_window_size has been updated to {self.max_window_size}"
                 )
 
+    async def _get_kv_cache_events(self) -> list:
+        events = []
+        try:
+            async for event in self.get_kv_cache_events_async(2):
+                events.append(event)
+        except IndexError:
+            # queue is empty, no more events
+            pass
+        return events
+
     async def process_kv_event(self):
-        events = await self.get_kv_cache_events_async()
-        async for event in events:
+        events = await self._get_kv_cache_events()
+        for event in events:
             event_id = event["event_id"]
             data = event["data"]
             if data["type"] == "stored":
@@ -280,14 +293,14 @@ class BaseLLM:
                 for block in data["blocks"]:
                     token_num_in_block = len(block["tokens"])
                     block_hash = _to_signed_i64(block["block_hash"])
-                    if token_num_in_block > 128:
+                    if token_num_in_block > KV_BLOCK_SIZE:
                         logger.error(
-                            f"Block {block_hash} contains {token_num_in_block} tokens, which is greater than kv_block_size {self.kv_block_size}"
+                            f"Block {block_hash} contains {token_num_in_block} tokens, which is greater than kv_block_size {KV_BLOCK_SIZE}"
                         )
                         return
-                    if token_num_in_block < 128:
-                        logger.debug(
-                            f"Early stop when block {block_hash} containing {token_num_in_block} tokens not equal to kv_block_size {self.kv_block_size}"
+                    if token_num_in_block < KV_BLOCK_SIZE:
+                        logger.warning(
+                            f"Early stop when block {block_hash} containing {token_num_in_block} tokens not equal to kv_block_size {KV_BLOCK_SIZE}"
                         )
                         self.partial_block_hashes.add(block_hash)
                         break
@@ -304,13 +317,15 @@ class BaseLLM:
                 logger.debug(
                     f"publish stored event: event_id: {event_id}, token_ids: {token_ids}, num_block_tokens: {num_block_tokens}, block_hashes: {block_hashes}, lora_id: {lora_id}, parent_hash: {parent_hash}"
                 )
-                self.kv_event_publisher.publish_stored(
-                    event_id,
-                    token_ids,
-                    num_block_tokens,
-                    block_hashes,
-                    lora_id,
-                    parent_hash,
+                self.kv_publish_events.append(
+                    KvPublishEvent(
+                        event_id=event_id,
+                        token_ids=token_ids,
+                        num_block_tokens=num_block_tokens,
+                        block_hashes=block_hashes,
+                        lora_id=lora_id,
+                        parent_hash=parent_hash,
+                    )
                 )
             elif data["type"] == "removed":
                 self.processing_initial_created_events = False
@@ -328,7 +343,12 @@ class BaseLLM:
                 logger.debug(
                     f"publish removed event: event_id: {event_id}, block_hashes: {block_hashes}"
                 )
-                self.kv_event_publisher.publish_removed(event_id, block_hashes)
+                self.kv_remove_events.append(
+                    KvRemoveEvent(
+                        event_id=event_id,
+                        block_hashes=block_hashes
+                    )
+                )
             elif data["type"] == "created" and self.processing_initial_created_events:
                 self.update_max_window_size(event)
 

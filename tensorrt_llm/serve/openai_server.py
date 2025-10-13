@@ -423,13 +423,7 @@ class OpenAIServer:
         return JSONResponse(content=events)
 
     async def _get_kv_cache_events(self) -> JSONResponse:
-        events = []
-        try:
-            async for event in self.llm.get_kv_cache_events_async(2):
-                events.append(event)
-        except IndexError:
-            # queue is empty, no more events
-            pass
+        events = await self.llm._get_kv_cache_events()
         return events
 
     async def _extract_metrics(self, res: RequestOutput):
@@ -480,7 +474,7 @@ class OpenAIServer:
                 promise: RequestOutput, postproc_params: PostprocParams, disaggregated_params: Optional[LlmDisaggregatedParams] = None) -> ChatCompletionResponse:
             await promise.aresult()
             if self.postproc_worker_enabled:
-                chat_response =promise.outputs[0]._postprocess_result
+                chat_response = promise.outputs[0]._postprocess_result
             else:
                 post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
                 chat_response = post_processor(promise, args)
@@ -491,6 +485,7 @@ class OpenAIServer:
             if disaggregated_params and disaggregated_params.request_type and disaggregated_params.request_type == "context_only":
                 chat_response.prompt_token_ids = promise.prompt_token_ids
             await self._extract_metrics(promise)
+            await self.llm.process_kv_event()
             return chat_response
 
         prom_metrics["request_started_total"] += 1
