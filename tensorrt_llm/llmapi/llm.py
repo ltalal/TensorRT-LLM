@@ -45,7 +45,7 @@ from .utils import (append_docstring, exception_handler, get_device_count,
                     print_colored_debug, set_api_status)
 
 
-KV_BLOCK_SIZE = 128
+KV_BLOCK_SIZE = 32
 
 def _to_signed_i64(value: int | None) -> int | None:
     """Convert a Python int to signed 64-bit range by two's complement."""
