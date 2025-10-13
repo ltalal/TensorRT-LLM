@@ -1,0 +1,87 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run TRTLLM Serve (Llama 3.1 8B, TP=2)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tensorrt_llm/commands/serve.py",
+      "args": [
+        "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        "--backend", "pytorch",
+        "--tp_size", "2",
+        "--pp_size", "1",
+        "--ep_size", "1",
+        "--host", "0.0.0.0",
+        "--port", "8000",
+        "--extra_llm_api_options", "/root/cfg.yml"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "console": "integratedTerminal",
+      "subProcess": true,
+      "justMyCode": false
+    },
+    {
+      "name": "Run TRTLLM Serve Disagg Prefill (Llama 3.1 8B, TP=1)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tensorrt_llm/commands/serve.py",
+      "args": [
+        "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        "--tp_size", "1",
+        "--pp_size", "1",
+        "--ep_size", "1",
+        "--host", "0.0.0.0",
+        "--port", "8000",
+        "--extra_llm_api_options", "test-configs/prefill.yaml"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}",
+        "CUDA_VISIBLE_DEVICES": "0"
+      },
+      "console": "integratedTerminal",
+      "subProcess": true,
+      "justMyCode": false
+    },
+    {
+      "name": "Run TRTLLM Serve Disagg Decode (Llama 3.1 8B, TP=1)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tensorrt_llm/commands/serve.py",
+      "args": [
+        "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        "--tp_size", "1",
+        "--pp_size", "1",
+        "--ep_size", "1",
+        "--host", "0.0.0.0",
+        "--port", "8001",
+        "--extra_llm_api_options", "test-configs/decode.yaml"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}",
+        "CUDA_VISIBLE_DEVICES": "1"
+      },
+      "console": "integratedTerminal",
+      "subProcess": true,
+      "justMyCode": false
+    },
+    {
+      "name": "Run TRTLLM Serve Disagg (Llama 3.1 8B, TP=1)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tensorrt_llm/commands/serve.py",
+      "args": [
+        "disaggregated",
+        "-c", "test-configs/disagg.yaml"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}",
+      },
+      "console": "integratedTerminal",
+      "subProcess": true,
+      "justMyCode": false
+    }
+  ]
+}

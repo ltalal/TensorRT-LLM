@@ -128,7 +128,7 @@ def download_precompiled(workspace: str, version: str) -> str:
     from setuptools.errors import SetupError
 
     cmd = [
-        "python3", "-m", "pip", "download", f"tensorrt_llm=={version}",
+        "python3", "-m", "pip", "download", f"tensorrt_llm==1.1.0rc4",
         f"--dest={workspace}", "--no-deps",
         "--extra-index-url=https://pypi.nvidia.com"
     ]
