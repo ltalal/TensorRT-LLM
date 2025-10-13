@@ -362,7 +362,7 @@ class OpenAIServer:
             self.metrics_collector.num_requests_waiting.set(prom_metrics["num_requests_waiting"])
             self.metrics_collector.generation_tokens_total.set(prom_metrics["generation_tokens_total"])
             self.metrics_collector.prompt_tokens_total.set(prom_metrics["prompt_tokens_total"])
-            self.metrics_collector.histogram_gpu_prefix_cache_usage.observe(await self.llm.get_kv_cache_usage())
+            self.metrics_collector.histogram_gpu_prefix_cache_usage.observe(await self.llm.process_events_and_get_kv_cache_usage())
 
     async def get_model(self) -> JSONResponse:
         model_list = ModelList(data=[ModelCard(id=self.model)])
