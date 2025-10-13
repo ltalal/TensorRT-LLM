@@ -89,6 +89,13 @@ class MetricsCollector:
             labelnames=self.labels.keys()
         ).labels(**self.labels)
 
+        self.histogram_gpu_prefix_cache_usage = Histogram(
+            name="gpu_prefix_cache_usage",
+            documentation="Histogram of GPU prefix cache usage as a ratio (0.0 to 1.0).",
+            buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
         self.histogram_kv_cache_transfer_time = Histogram(
             name="kv_cache_transfer_time_seconds",
             documentation="Histogram of KV cache transfer time in seconds.",

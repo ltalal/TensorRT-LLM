@@ -362,6 +362,7 @@ class OpenAIServer:
             self.metrics_collector.num_requests_waiting.set(prom_metrics["num_requests_waiting"])
             self.metrics_collector.generation_tokens_total.set(prom_metrics["generation_tokens_total"])
             self.metrics_collector.prompt_tokens_total.set(prom_metrics["prompt_tokens_total"])
+            self.metrics_collector.histogram_gpu_prefix_cache_usage.observe(await self.llm.get_kv_cache_usage())
 
     async def get_model(self) -> JSONResponse:
         model_list = ModelList(data=[ModelCard(id=self.model)])
@@ -485,8 +486,8 @@ class OpenAIServer:
             if disaggregated_params and disaggregated_params.request_type and disaggregated_params.request_type == "context_only":
                 chat_response.prompt_token_ids = promise.prompt_token_ids
             await self._extract_metrics(promise)
-            n_allocated_blocks, n_partial_blocks  = await self.llm.get_kv_cache_usage()
-            print(f"Total number of allocated KV blocks: {n_allocated_blocks}, partial KV blocks: {n_partial_blocks}")
+            # kv_cache_usage  = await self.llm.get_kv_cache_usage()
+            # print(f"kv cache usage: {kv_cache_usage*100:.2f}%")
             return chat_response
 
         prom_metrics["request_started_total"] += 1
