@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from tqdm import tqdm
 from transformers import PreTrainedTokenizerBase
 
+from tensorrt_llm._torch.pyexecutor.resource_manager import KV_CACHE_CONFIG_STATE_PATH
 from tensorrt_llm.inputs.data import TextPrompt
 from tensorrt_llm.inputs.multimodal import MultimodalParams
 from tensorrt_llm.inputs.registry import DefaultInputProcessor
@@ -152,6 +153,7 @@ class BaseLLM:
                  tokenizer_revision: Optional[str] = None,
                  **kwargs: Any) -> None:
 
+
         self._executor_cls = kwargs.pop("executor_cls", GenerationExecutor)
         self._llm_id = None
 
@@ -259,6 +261,15 @@ class BaseLLM:
         self.kv_publish_events: List[KvPublishEvent] = []
         self.kv_remove_events: List[KvRemoveEvent] = []
         self.processing_initial_created_events = True
+        self.allocated_blocks = set()
+        while not os.path.exists(KV_CACHE_CONFIG_STATE_PATH):
+            time.sleep(1)
+            print("Waiting for KV_CACHE_CONFIG_STATE_PATH to be created...")
+        with open(KV_CACHE_CONFIG_STATE_PATH, "r") as f:
+            kv_cache_config = json.load(f)
+            self.tokens_per_block = kv_cache_config["tokens_per_block"]
+            self.blocks_in_primary_pool = kv_cache_config["blocks_in_primary_pool"]
+            self.blocks_in_secondary_pool = kv_cache_config["blocks_in_secondary_pool"]
 
     def update_max_window_size(self, event):
         if "window_size" in event:
@@ -279,7 +290,7 @@ class BaseLLM:
             pass
         return events
 
-    async def process_kv_event(self):
+    async def get_kv_cache_usage(self) -> float:
         events = await self._get_kv_cache_events()
         for event in events:
             event_id = event["event_id"]
@@ -293,14 +304,14 @@ class BaseLLM:
                 for block in data["blocks"]:
                     token_num_in_block = len(block["tokens"])
                     block_hash = _to_signed_i64(block["block_hash"])
-                    if token_num_in_block > KV_BLOCK_SIZE:
+                    if token_num_in_block > self.tokens_per_block:
                         logger.error(
-                            f"Block {block_hash} contains {token_num_in_block} tokens, which is greater than kv_block_size {KV_BLOCK_SIZE}"
+                            f"Block {block_hash} contains {token_num_in_block} tokens, which is greater than kv_block_size {self.tokens_per_block}"
                         )
                         return
-                    if token_num_in_block < KV_BLOCK_SIZE:
+                    if token_num_in_block < self.tokens_per_block:
                         logger.warning(
-                            f"Early stop when block {block_hash} containing {token_num_in_block} tokens not equal to kv_block_size {KV_BLOCK_SIZE}"
+                            f"Early stop when block {block_hash} containing {token_num_in_block} tokens not equal to kv_block_size {self.tokens_per_block}"
                         )
                         self.partial_block_hashes.add(block_hash)
                         break
@@ -317,16 +328,8 @@ class BaseLLM:
                 logger.debug(
                     f"publish stored event: event_id: {event_id}, token_ids: {token_ids}, num_block_tokens: {num_block_tokens}, block_hashes: {block_hashes}, lora_id: {lora_id}, parent_hash: {parent_hash}"
                 )
-                self.kv_publish_events.append(
-                    KvPublishEvent(
-                        event_id=event_id,
-                        token_ids=token_ids,
-                        num_block_tokens=num_block_tokens,
-                        block_hashes=block_hashes,
-                        lora_id=lora_id,
-                        parent_hash=parent_hash,
-                    )
-                )
+                for block_hash in block_hashes:
+                    self.allocated_blocks.add(block_hash)
             elif data["type"] == "removed":
                 self.processing_initial_created_events = False
                 block_hashes = []
@@ -343,16 +346,13 @@ class BaseLLM:
                 logger.debug(
                     f"publish removed event: event_id: {event_id}, block_hashes: {block_hashes}"
                 )
-                self.kv_remove_events.append(
-                    KvRemoveEvent(
-                        event_id=event_id,
-                        block_hashes=block_hashes
-                    )
-                )
+                for block_hash in block_hashes:
+                    if block_hash in self.allocated_blocks:
+                        self.allocated_blocks.remove(block_hash)
             elif data["type"] == "created" and self.processing_initial_created_events:
                 self.update_max_window_size(event)
 
-        return True
+        return len(self.allocated_blocks) / self.blocks_in_primary_pool
 
     @property
     @set_api_status("beta")

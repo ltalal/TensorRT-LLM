@@ -1,5 +1,6 @@
 import copy
 import enum
+import json
 import math
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
@@ -51,6 +52,8 @@ class ResourceManagerType(enum.Enum):
     SEQ_SLOT_MANAGER = "SEQ_SLOT_MANAGER"
     SPEC_RESOURCE_MANAGER = "SPEC_RESOURCE_MANAGER"
 
+
+KV_CACHE_CONFIG_STATE_PATH = "/tmp/kv_cache_config_state.json"
 
 def compute_page_count(token_count: int, tokens_per_page: int) -> int:
     return (token_count + tokens_per_page) // tokens_per_page
@@ -287,6 +290,15 @@ class KVCacheManager(BaseResourceManager):
                 self.max_attention_window_vec[0]:
                 (self.blocks_in_primary_pool, self.blocks_in_secondary_pool)
             }
+            with open(KV_CACHE_CONFIG_STATE_PATH, "w") as f:
+                json.dump(
+                    {
+                        "tokens_per_block": tokens_per_block,
+                        "blocks_in_primary_pool": self.blocks_in_primary_pool,
+                        "blocks_in_secondary_pool": self.blocks_in_secondary_pool
+                    },
+                    f,
+                )
 
         # Validate and adjust attention windows against their upper bounds if needed
         blocks_per_window, self.max_seq_len, self.max_attention_window_vec = self._validate_and_adjust_attention_windows(

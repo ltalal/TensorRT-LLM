@@ -485,7 +485,8 @@ class OpenAIServer:
             if disaggregated_params and disaggregated_params.request_type and disaggregated_params.request_type == "context_only":
                 chat_response.prompt_token_ids = promise.prompt_token_ids
             await self._extract_metrics(promise)
-            await self.llm.process_kv_event()
+            n_allocated_blocks, n_partial_blocks  = await self.llm.get_kv_cache_usage()
+            print(f"Total number of allocated KV blocks: {n_allocated_blocks}, partial KV blocks: {n_partial_blocks}")
             return chat_response
 
         prom_metrics["request_started_total"] += 1
