@@ -111,6 +111,13 @@ class MetricsCollector:
             labelnames=self.labels.keys()
         ).labels(**self.labels)
 
+        self.free_kv_block_rate = Histogram(
+            name="free_kv_block_rate",
+            documentation="Free KV block rate.",
+            buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
         self.spec_decode_draft_acceptance_rate = Histogram(
             name="spec_decode_draft_acceptance_rate",
             documentation="Speculative decoding draft acceptance rate.",

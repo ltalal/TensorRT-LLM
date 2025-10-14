@@ -362,6 +362,12 @@ class OpenAIServer:
             self.metrics_collector.num_requests_waiting.set(prom_metrics["num_requests_waiting"])
             self.metrics_collector.generation_tokens_total.set(prom_metrics["generation_tokens_total"])
             self.metrics_collector.prompt_tokens_total.set(prom_metrics["prompt_tokens_total"])
+            stats = self.llm.get_stats()
+            if len(stats) == 0:
+                return
+            latest_stat = stats[-1]
+            free_kv_blocks_rate = latest_stat["kvCacheStats"]["numF"]
+
 
     async def get_model(self) -> JSONResponse:
         model_list = ModelList(data=[ModelCard(id=self.model)])
