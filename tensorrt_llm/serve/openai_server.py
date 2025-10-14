@@ -362,11 +362,16 @@ class OpenAIServer:
             self.metrics_collector.num_requests_waiting.set(prom_metrics["num_requests_waiting"])
             self.metrics_collector.generation_tokens_total.set(prom_metrics["generation_tokens_total"])
             self.metrics_collector.prompt_tokens_total.set(prom_metrics["prompt_tokens_total"])
-            stats = self.llm.get_stats()
+            stats = await self.get_iteration_stats_list()
             if len(stats) == 0:
                 return
             latest_stat = stats[-1]
-            free_kv_blocks_rate = latest_stat["kvCacheStats"]["numF"]
+            if "kvCacheStats" not in latest_stat:
+                return
+            if "freeNumBlocks" not in latest_stat["kvCacheStats"] or "maxNumBlocks" not in latest_stat["kvCacheStats"]:
+                return
+            free_kv_blocks_rate = latest_stat["kvCacheStats"]["freeNumBlocks"] / latest_stat["kvCacheStats"]["maxNumBlocks"]
+            self.metrics_collector.free_kv_block_rate.observe(free_kv_blocks_rate)
 
 
     async def get_model(self) -> JSONResponse:
@@ -375,10 +380,14 @@ class OpenAIServer:
 
     # FIXME: Currently unused
     async def get_iteration_stats(self) -> JSONResponse:
+        stats = self.get_iteration_stats_list()
+        return JSONResponse(content=stats)
+
+    async def get_iteration_stats_list(self) -> list:
         stats = []
         async for stat in self.llm.get_stats_async(2):
             stats.append(stat)
-        return JSONResponse(content=stats)
+        return stats
 
     async def get_perf_metrics(self) -> JSONResponse:
         if self.perf_metrics is None:
