@@ -111,27 +111,10 @@ class MetricsCollector:
             labelnames=self.labels.keys()
         ).labels(**self.labels)
 
-        self.gpu_cache_blocks_free = Gauge(
-            name="gpu_cache_blocks_free",
-            documentation="Number of free block in KV cache",
-            labelnames=self.labels.keys()
-        ).labels(**self.labels)
-
-        self.gpu_cache_blocks_max = Gauge(
-            name="gpu_cache_blocks_max",
-            documentation="Total number of blocks in KV cache",
-            labelnames=self.labels.keys()
-        ).labels(**self.labels)
-
-        self.gpu_cache_blocks_size = Gauge(
-            name="gpu_cache_blocks_size",
-            documentation="Size of block in KV cache in tokens",
-            labelnames=self.labels.keys()
-        ).labels(**self.labels)
-
-        self.gpu_cache_usage_perc = Gauge(
-            name="gpu_cache_usage_perc",
-            documentation="Percentage of used cache blocks by vLLM",
+        self.free_kv_block_rate = Histogram(
+            name="free_kv_block_rate",
+            documentation="Free KV block rate.",
+            buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
             labelnames=self.labels.keys()
         ).labels(**self.labels)
 
