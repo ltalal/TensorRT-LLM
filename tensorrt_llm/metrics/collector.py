@@ -135,6 +135,36 @@ class MetricsCollector:
             labelnames=self.labels.keys()
         ).labels(**self.labels)
 
+        self.cpu_mem_usage = Gauge(
+            name="cpu_mem_usage",
+            documentation="CPU memory usage in bytes",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.gpu_mem_usage = Gauge(
+            name="gpu_mem_usage",
+            documentation="GPU memory usage in bytes",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.num_iterations_total = Gauge(
+            name="num_iterations_total",
+            documentation="Number of iterations executed",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.num_active_requests = Gauge(
+            name="num_active_requests",
+            documentation="Number of active requests",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.num_queued_requests = Gauge(
+            name="num_queued_requests",
+            documentation="Number of active requests",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
         self.spec_decode_draft_acceptance_rate = Histogram(
             name="spec_decode_draft_acceptance_rate",
             documentation="Speculative decoding draft acceptance rate.",

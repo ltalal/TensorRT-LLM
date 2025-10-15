@@ -371,10 +371,17 @@ class OpenAIServer:
             logger.info(f"Iter stats: {latest_stats_s}")
 
             try:
-                self.latest_stat = json.loads(latest_stats_s)
+                stats = json.loads(latest_stats_s)
+                self.latest_stat = stats
             except Exception as e:
-                logger.warning(f"proxy.py: Error in json.loads: {e}")
+                logger.warning(f"openai_server.py: Error in json.loads: {e}")
                 return
+
+            self.metrics_collector.cpu_mem_usage.set(stats["cpuMemUsage"])
+            self.metrics_collector.gpu_mem_usage.set(stats["gpuMemUsage"])
+            self.metrics_collector.num_iterations_total.set(stats["gpuMemUsage"])
+            self.metrics_collector.num_active_requests.set(stats["numActiveRequests"])
+            self.metrics_collector.num_queued_requests.set(stats["numQueuedRequests"])
 
             if "kvCacheStats" not in self.latest_stat:
                 return
@@ -385,11 +392,11 @@ class OpenAIServer:
                 free_num_blocks = kv_stat["freeNumBlocks"]
                 max_num_blocks = kv_stat["maxNumBlocks"]
                 gpu_cache_usage_perc = free_num_blocks / max_num_blocks
-                self.metrics_collector.gpu_cache_usage_perc.observe(gpu_cache_usage_perc)
-                self.metrics_collector.gpu_cache_blocks_max.observe(max_num_blocks)
-                self.metrics_collector.gpu_cache_blocks_free.observe(free_num_blocks)
+                self.metrics_collector.gpu_cache_usage_perc.set(gpu_cache_usage_perc)
+                self.metrics_collector.gpu_cache_blocks_max.set(max_num_blocks)
+                self.metrics_collector.gpu_cache_blocks_free.set(free_num_blocks)
 
-            self.metrics_collector.gpu_cache_blocks_size.observe(kv_stat["toksPerBlock"])
+            self.metrics_collector.num_iterations_total.set(kv_stat["cpuMemUsage"])
 
     async def get_model(self) -> JSONResponse:
         model_list = ModelList(data=[ModelCard(id=self.model)])
