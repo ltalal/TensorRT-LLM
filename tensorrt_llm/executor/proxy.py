@@ -223,13 +223,8 @@ class GenerationExecutorProxy(GenerationExecutor):
         while queue.full():
             queue.get()
 
-        for d in reversed(data):
-            if d is not None:
-                try:
-                    self._latest_stats = json.loads(d)
-                except Exception as e:
-                    logger.warning(f"proxy.py: Error in json.loads: {e}")
-                return True
+        if len(data) > 0:
+            self._latest_stats = data[-1]
 
         try:
             for d in data:
