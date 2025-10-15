@@ -371,12 +371,12 @@ class OpenAIServer:
             logger.info(f"Iter stats: {latest_stats_s}")
 
             try:
-                latest_stats = json.loads(latest_stats_s)
+                self.latest_stat = json.loads(latest_stats_s)
             except Exception as e:
                 logger.warning(f"proxy.py: Error in json.loads: {e}")
                 return
 
-            if "kvCacheStats" not in latest_stats:
+            if "kvCacheStats" not in self.latest_stat:
                 return
 
             kv_stat = self.latest_stat["kvCacheStats"]
