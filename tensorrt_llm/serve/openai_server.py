@@ -119,7 +119,7 @@ class OpenAIServer:
         self.metrics_collector = None
         self.perf_metrics = None
         self.perf_metrics_lock = None
-        self.latest_stat = None
+        self.latest_stats_s = None
         if self.llm.args.return_perf_metrics:
             set_prometheus_multiproc_dir()
             self.metrics_collector = MetricsCollector({
@@ -365,16 +365,16 @@ class OpenAIServer:
             self.metrics_collector.generation_tokens_total.set(prom_metrics["generation_tokens_total"])
             self.metrics_collector.prompt_tokens_total.set(prom_metrics["prompt_tokens_total"])
             latest_stats_s = self.llm._executor._latest_stats
-            if latest_stats_s is None:
+            if latest_stats_s is None or self.latest_stats_s == latest_stats_s:
                 return
-            # TODO remove debug log
-            logger.info(f"Iter stats: {latest_stats_s}")
+
+            logger.debug(f"Iter stats: %s", latest_stats_s)
 
             try:
                 stats = json.loads(latest_stats_s)
-                self.latest_stat = stats
+                self.latest_stats_s = latest_stats_s
             except Exception as e:
-                logger.warning(f"openai_server.py: Error in json.loads: {e}")
+                logger.warning(f"openai_server.py: Error in json.loads: {e}. cannot parse: {latest_stats_s}")
                 return
 
             self.metrics_collector.cpu_mem_usage.set(stats["cpuMemUsage"])
@@ -384,10 +384,10 @@ class OpenAIServer:
             self.metrics_collector.num_queued_requests.set(stats["numQueuedRequests"])
             self.metrics_collector.num_iterations_total.set(stats["cpuMemUsage"])
 
-            if "kvCacheStats" not in self.latest_stat:
+            if "kvCacheStats" not in stats:
                 return
 
-            kv_stat = self.latest_stat["kvCacheStats"]
+            kv_stat = stats["kvCacheStats"]
 
             if "freeNumBlocks" in kv_stat and "maxNumBlocks" in kv_stat:
                 free_num_blocks = kv_stat["freeNumBlocks"]
@@ -408,7 +408,7 @@ class OpenAIServer:
         return JSONResponse(content=stats)
 
     async def get_latest_iteration_stats(self) -> JSONResponse:
-        return JSONResponse(content=self.latest_stat)
+        return Response(content=self.latest_stats_s, media_type="application/json")
 
     async def get_iteration_stats_list(self, timeout=2) -> list:
         stats = []
