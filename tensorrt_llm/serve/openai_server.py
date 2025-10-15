@@ -362,17 +362,15 @@ class OpenAIServer:
             self.metrics_collector.num_requests_waiting.set(prom_metrics["num_requests_waiting"])
             self.metrics_collector.generation_tokens_total.set(prom_metrics["generation_tokens_total"])
             self.metrics_collector.prompt_tokens_total.set(prom_metrics["prompt_tokens_total"])
-            stats = await self.get_iteration_stats_list()
-            if len(stats) == 0:
+            latest_stats = self.llm._executor._latest_stats
+            if latest_stats is None:
                 return
-            latest_stat = stats[-1]
-            if "kvCacheStats" not in latest_stat:
+            if "kvCacheStats" not in latest_stats:
                 return
-            if "freeNumBlocks" not in latest_stat["kvCacheStats"] or "maxNumBlocks" not in latest_stat["kvCacheStats"]:
+            if "freeNumBlocks" not in latest_stats["kvCacheStats"] or "maxNumBlocks" not in latest_stats["kvCacheStats"]:
                 return
-            free_kv_blocks_rate = latest_stat["kvCacheStats"]["freeNumBlocks"] / latest_stat["kvCacheStats"]["maxNumBlocks"]
+            free_kv_blocks_rate = latest_stats["kvCacheStats"]["freeNumBlocks"] / latest_stats["kvCacheStats"]["maxNumBlocks"]
             self.metrics_collector.free_kv_block_rate.observe(free_kv_blocks_rate)
-
 
     async def get_model(self) -> JSONResponse:
         model_list = ModelList(data=[ModelCard(id=self.model)])
