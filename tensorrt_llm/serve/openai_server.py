@@ -119,6 +119,7 @@ class OpenAIServer:
         self.metrics_collector = None
         self.perf_metrics = None
         self.perf_metrics_lock = None
+        self.latest_stat = None
         if self.llm.args.return_perf_metrics:
             set_prometheus_multiproc_dir()
             self.metrics_collector = MetricsCollector({
@@ -220,6 +221,7 @@ class OpenAIServer:
         # TODO: the metrics endpoint only reports runtime stats, not iteration stats
         self.app.add_api_route("/metrics", self.metrics, methods=["GET"])
         self.app.add_api_route("/metrics/", self.metrics, methods=["GET"])
+        self.app.add_api_route("/latest_iter_stats", self.get_latest_iteration_stats, methods=["GET"])
         self.app.add_api_route("/perf_metrics", self.get_perf_metrics, methods=["GET"])
         # TODO: workaround before ETCD support
         self.app.add_api_route("/kv_cache_events", self.get_kv_cache_events, methods=["POST"])
@@ -362,16 +364,27 @@ class OpenAIServer:
             self.metrics_collector.num_requests_waiting.set(prom_metrics["num_requests_waiting"])
             self.metrics_collector.generation_tokens_total.set(prom_metrics["generation_tokens_total"])
             self.metrics_collector.prompt_tokens_total.set(prom_metrics["prompt_tokens_total"])
-            stats = await self.get_iteration_stats_list()
+
+            stats = await self.get_iteration_stats_list(timeout=0)
             if len(stats) == 0:
                 return
-            latest_stat = stats[-1]
-            if "kvCacheStats" not in latest_stat:
+            self.latest_stat = stats[-1]
+            if "kvCacheStats" not in self.latest_stat:
                 return
-            if "freeNumBlocks" not in latest_stat["kvCacheStats"] or "maxNumBlocks" not in latest_stat["kvCacheStats"]:
+            kv_stat = self.latest_stat["kvCacheStats"]
+            if "freeNumBlocks" not in kv_stat or "maxNumBlocks" not in kv_stat:
                 return
-            free_kv_blocks_rate = latest_stat["kvCacheStats"]["freeNumBlocks"] / latest_stat["kvCacheStats"]["maxNumBlocks"]
-            self.metrics_collector.free_kv_block_rate.observe(free_kv_blocks_rate)
+
+            # TODO remove debug log
+            logger.info(f"Iter stats: {json.dumps(self.latest_stat)}")
+
+            free_num_blocks = kv_stat["freeNumBlocks"]
+            max_num_blocks = kv_stat["maxNumBlocks"]
+            gpu_cache_usage_perc = free_num_blocks / max_num_blocks
+            self.metrics_collector.gpu_cache_usage_perc.observe(gpu_cache_usage_perc)
+            self.metrics_collector.gpu_cache_blocks_max.observe(max_num_blocks)
+            self.metrics_collector.gpu_cache_blocks_free.observe(free_num_blocks)
+            self.metrics_collector.gpu_cache_blocks_size.observe(kv_stat["toksPerBlock"])
 
 
     async def get_model(self) -> JSONResponse:
@@ -383,9 +396,12 @@ class OpenAIServer:
         stats = self.get_iteration_stats_list()
         return JSONResponse(content=stats)
 
-    async def get_iteration_stats_list(self) -> list:
+    async def get_latest_iteration_stats(self) -> JSONResponse:
+        return JSONResponse(content=self.latest_stat)
+
+    async def get_iteration_stats_list(self, timeout=2) -> list:
         stats = []
-        async for stat in self.llm.get_stats_async(2):
+        async for stat in self.llm.get_stats_async(timeout):
             stats.append(stat)
         return stats
 
