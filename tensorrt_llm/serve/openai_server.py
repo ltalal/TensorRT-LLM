@@ -382,6 +382,7 @@ class OpenAIServer:
             self.metrics_collector.num_iterations_total.set(stats["gpuMemUsage"])
             self.metrics_collector.num_active_requests.set(stats["numActiveRequests"])
             self.metrics_collector.num_queued_requests.set(stats["numQueuedRequests"])
+            self.metrics_collector.num_iterations_total.set(stats["cpuMemUsage"])
 
             if "kvCacheStats" not in self.latest_stat:
                 return
@@ -396,7 +397,6 @@ class OpenAIServer:
                 self.metrics_collector.gpu_cache_blocks_max.set(max_num_blocks)
                 self.metrics_collector.gpu_cache_blocks_free.set(free_num_blocks)
 
-            self.metrics_collector.num_iterations_total.set(kv_stat["cpuMemUsage"])
 
     async def get_model(self) -> JSONResponse:
         model_list = ModelList(data=[ModelCard(id=self.model)])
