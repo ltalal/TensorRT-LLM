@@ -111,6 +111,90 @@ class MetricsCollector:
             labelnames=self.labels.keys()
         ).labels(**self.labels)
 
+        self.gpu_cache_blocks_free = Gauge(
+            name="gpu_cache_blocks_free",
+            documentation="Number of free block in KV cache",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.gpu_cache_blocks_used = Gauge(
+            name="gpu_cache_blocks_used",
+            documentation="Number of used block in KV cache",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.gpu_cache_blocks_reused_total = Gauge(
+            name="gpu_cache_blocks_reused_total",
+            documentation="Total number of reused block in KV cache",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.gpu_cache_blocks_missed_total = Gauge(
+            name="gpu_cache_blocks_missed_total",
+            documentation="Total number of reused block in KV cache",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.gpu_cache_blocks_max = Gauge(
+            name="gpu_cache_blocks_max",
+            documentation="Total number of blocks in KV cache",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.conf_kv_tokens_per_block = Gauge(
+            name="conf_kv_tokens_per_block",
+            documentation="Size of block in KV cache in tokens",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.gpu_cache_blocks_alloc_total = Gauge(
+            name="gpu_cache_blocks_alloc_total",
+            documentation="Total number of blocks allocated",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.gpu_cache_blocks_alloc_new_total = Gauge(
+            name="gpu_cache_blocks_alloc_new_total",
+            documentation="Total number of new blocks allocated",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.gpu_cache_usage_perc = Gauge(
+            name="gpu_cache_usage_perc",
+            documentation="Percentage of used cache blocks",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.cpu_mem_usage = Gauge(
+            name="cpu_mem_usage",
+            documentation="CPU memory usage in bytes",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.gpu_mem_usage = Gauge(
+            name="gpu_mem_usage",
+            documentation="GPU memory usage in bytes",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.num_iterations_total = Gauge(
+            name="num_iterations_total",
+            documentation="Number of iterations executed",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.num_active_requests = Gauge(
+            name="num_active_requests",
+            documentation="Number of active requests",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
+        self.num_queued_requests = Gauge(
+            name="num_queued_requests",
+            documentation="Number of active requests",
+            labelnames=self.labels.keys()
+        ).labels(**self.labels)
+
         self.spec_decode_draft_acceptance_rate = Histogram(
             name="spec_decode_draft_acceptance_rate",
             documentation="Speculative decoding draft acceptance rate.",

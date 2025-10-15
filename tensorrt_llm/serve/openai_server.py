@@ -119,6 +119,7 @@ class OpenAIServer:
         self.metrics_collector = None
         self.perf_metrics = None
         self.perf_metrics_lock = None
+        self.latest_stats_s = None
         if self.llm.args.return_perf_metrics:
             set_prometheus_multiproc_dir()
             self.metrics_collector = MetricsCollector({
@@ -220,6 +221,7 @@ class OpenAIServer:
         # TODO: the metrics endpoint only reports runtime stats, not iteration stats
         self.app.add_api_route("/metrics", self.metrics, methods=["GET"])
         self.app.add_api_route("/metrics/", self.metrics, methods=["GET"])
+        self.app.add_api_route("/latest_iter_stats", self.get_latest_iteration_stats, methods=["GET"])
         self.app.add_api_route("/perf_metrics", self.get_perf_metrics, methods=["GET"])
         # TODO: workaround before ETCD support
         self.app.add_api_route("/kv_cache_events", self.get_kv_cache_events, methods=["POST"])
@@ -362,6 +364,44 @@ class OpenAIServer:
             self.metrics_collector.num_requests_waiting.set(prom_metrics["num_requests_waiting"])
             self.metrics_collector.generation_tokens_total.set(prom_metrics["generation_tokens_total"])
             self.metrics_collector.prompt_tokens_total.set(prom_metrics["prompt_tokens_total"])
+            latest_stats_s = self.llm._executor._latest_stats
+            if latest_stats_s is None or self.latest_stats_s == latest_stats_s:
+                return
+
+            logger.debug(f"Iter stats: %s", latest_stats_s)
+
+            try:
+                stats = json.loads(latest_stats_s)
+                self.latest_stats_s = latest_stats_s
+            except Exception as e:
+                logger.warning(f"openai_server.py: Error in json.loads: {e}. cannot parse: {latest_stats_s}")
+                return
+
+            self.metrics_collector.cpu_mem_usage.set(stats["cpuMemUsage"])
+            self.metrics_collector.gpu_mem_usage.set(stats["gpuMemUsage"])
+            self.metrics_collector.num_iterations_total.set(stats["gpuMemUsage"])
+            self.metrics_collector.num_active_requests.set(stats["numActiveRequests"])
+            self.metrics_collector.num_queued_requests.set(stats["numQueuedRequests"])
+            self.metrics_collector.num_iterations_total.set(stats["cpuMemUsage"])
+
+            if "kvCacheStats" not in stats:
+                return
+
+            kv_stat = stats["kvCacheStats"]
+
+            free_num_blocks = kv_stat["freeNumBlocks"]
+            used_num_blocks = kv_stat["usedNumBlocks"]
+            max_num_blocks = kv_stat["maxNumBlocks"]
+            self.metrics_collector.gpu_cache_usage_perc.set((max_num_blocks - free_num_blocks) / max_num_blocks)
+            self.metrics_collector.gpu_cache_blocks_max.set(max_num_blocks)
+            self.metrics_collector.gpu_cache_blocks_free.set(free_num_blocks)
+            self.metrics_collector.gpu_cache_blocks_used.set(used_num_blocks)
+            self.metrics_collector.gpu_cache_blocks_reused_total.set(kv_stat["reusedBlocks"])
+            self.metrics_collector.gpu_cache_blocks_missed_total.set(kv_stat["missedBlocks"])
+            self.metrics_collector.gpu_cache_blocks_alloc_new_total.set(kv_stat["allocNewBlocks"])
+            self.metrics_collector.gpu_cache_blocks_alloc_total.set(kv_stat["allocTotalBlocks"])
+            self.metrics_collector.conf_kv_tokens_per_block.set(kv_stat["tokensPerBlock"])
+
 
     async def get_model(self) -> JSONResponse:
         model_list = ModelList(data=[ModelCard(id=self.model)])
@@ -369,10 +409,17 @@ class OpenAIServer:
 
     # FIXME: Currently unused
     async def get_iteration_stats(self) -> JSONResponse:
-        stats = []
-        async for stat in self.llm.get_stats_async(2):
-            stats.append(stat)
+        stats = self.get_iteration_stats_list()
         return JSONResponse(content=stats)
+
+    async def get_latest_iteration_stats(self) -> JSONResponse:
+        return Response(content=self.latest_stats_s, media_type="application/json")
+
+    async def get_iteration_stats_list(self, timeout=2) -> list:
+        stats = []
+        async for stat in self.llm.get_stats_async(timeout):
+            stats.append(stat)
+        return stats
 
     async def get_perf_metrics(self) -> JSONResponse:
         if self.perf_metrics is None:
