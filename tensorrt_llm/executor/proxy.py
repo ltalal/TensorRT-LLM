@@ -219,13 +219,14 @@ class GenerationExecutorProxy(GenerationExecutor):
         data = data if isinstance(data, list) else [data]
         queue = result_singleton.queue
         async_queues = []
-        for d in reversed(data):
-            if d is not None:
-                self._latest_stats = json.loads(d)
-                return
 
         while queue.full():
             queue.get()
+
+        for d in reversed(data):
+            if d is not None:
+                self._latest_stats = json.loads(d)
+                return True
 
         try:
             for d in data:
