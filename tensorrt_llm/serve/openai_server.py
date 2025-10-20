@@ -342,6 +342,7 @@ class OpenAIServer:
         return Response(status_code=200, content=resp)
 
     async def read_metrics_file(self):
+        # TODO remove sync over shared file, replace all stats with iter_stats
         global prom_metrics_file
         bufs = None
         try:
