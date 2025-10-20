@@ -60,13 +60,15 @@ from tensorrt_llm.serve.responses_utils import \
 from tensorrt_llm.serve.responses_utils import \
     request_preprocess as responses_api_request_preprocess
 from tensorrt_llm.version import __version__ as VERSION
-from tensorrt_llm._torch.pyexecutor.py_executor import PROM_METRICS_FILENAME
 
 from collections import defaultdict
 import array
 import json
 import os
 import traceback
+
+# Define the metrics filename locally to avoid circular import
+PROM_METRICS_FILENAME = '/dev/shm/prom_metrics.json'
 
 prom_metrics_file = None
 prom_metrics = defaultdict(float, {
