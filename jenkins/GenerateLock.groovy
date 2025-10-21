@@ -24,12 +24,12 @@ def createKubernetesPodConfig()
                     resources:
                       requests:
                         cpu: '8'
-                        memory: 32Gi
-                        ephemeral-storage: 200Gi
+                        memory: 48Gi
+                        ephemeral-storage: 400Gi
                       limits:
                         cpu: '8'
-                        memory: 32Gi
-                        ephemeral-storage: 200Gi
+                        memory: 48Gi
+                        ephemeral-storage: 400Gi
                     imagePullPolicy: Always
                 qosClass: Guaranteed
         """.stripIndent(),
