@@ -3,6 +3,7 @@ import asyncio
 import os
 import re
 import signal
+import time
 import traceback
 from collections import deque
 from contextlib import asynccontextmanager
@@ -181,6 +182,58 @@ class OpenAIServer:
             assert isinstance(self.llm, MultimodalEncoder), "llm must be a MultimodalEncoder for multimodal encoder"
             self.register_mm_encoder_routes()
 
+
+    def _check_stuck_requests(self) -> bool:
+        """
+        Check for stuck requests with "GENERATION_COMPLETE" stage.
+
+        Returns:
+            bool: True if stuck requests are found, False otherwise.
+        """
+        # Get the latest stats
+        latest_stats_s = self.llm._executor._latest_stats
+        if latest_stats_s is None:
+            return False
+
+        try:
+            stats = json.loads(latest_stats_s)
+        except Exception as e:
+            logger.warning(f"openai_server.py: Error in json.loads: {e}. cannot parse: {latest_stats_s}")
+            return False
+
+        # Get current timestamp
+        current_time = time.monotonic()
+
+        # Get request stats
+        request_stats = stats.get("requestStats", [])
+
+        # Create a set of current GENERATION_COMPLETE request IDs
+        current_generation_complete_ids = set()
+        for request in request_stats:
+            if request.get("stage") == "GENERATION_COMPLETE":
+                request_id = request.get("id")
+                if request_id is not None:
+                    current_generation_complete_ids.add(request_id)
+
+                    # If this is a new GENERATION_COMPLETE request, track its timestamp
+                    if request_id not in self.stuck_requests_tracker:
+                        self.stuck_requests_tracker[request_id] = current_time
+
+        # Remove requests from tracker that are no longer in GENERATION_COMPLETE stage
+        tracked_ids = list(self.stuck_requests_tracker.keys())
+        for request_id in tracked_ids:
+            if request_id not in current_generation_complete_ids:
+                del self.stuck_requests_tracker[request_id]
+
+        # Check if any tracked requests have been stuck for too long
+        for request_id, timestamp in self.stuck_requests_tracker.items():
+            if current_time - timestamp > self.stuck_requests_threshold:
+                logger.error(f"Stuck request detected: request_id={request_id}, stuck_for={current_time - timestamp} seconds")
+                return True
+
+        return False
+
+
     async def await_disconnected(self, raw_request: Request, promise):
         if raw_request is None:
             return
@@ -284,6 +337,9 @@ class OpenAIServer:
                                methods=["POST"])
 
     async def health(self) -> Response:
+        # Check for stuck requests
+        if self._check_stuck_requests():
+            return Response(status_code=500, content="Stuck requests detected")
         return Response(status_code=200)
 
     async def health_generate(self) -> Response:
