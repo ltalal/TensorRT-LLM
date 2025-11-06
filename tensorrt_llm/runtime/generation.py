@@ -3397,6 +3397,7 @@ class GenerationSession(object):
         5. Update KV cache : self.[sequence_length, num_draft_tokens]
         6. Update sequence_length_buffer and past_kv_length
         """
+        print("USING THIS WEIRD METHOD!!!!!")
         should_stop = torch.tensor([False], dtype=bool)
         if self.is_medusa_mode:
             # NOTE: this function call also updates self.[accept_lengths, new_tokens, medusa_output_tokens]

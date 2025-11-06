@@ -281,6 +281,9 @@ class PyTorchModelEngine(ModelEngine):
             self.draft_tokens_cuda = torch.empty((max_num_draft_tokens, ),
                                                  dtype=torch.int,
                                                  device='cuda')
+            self.draft_probs_cuda = torch.empty((max_num_draft_tokens, ),
+                                                 dtype=torch.float,
+                                                 device='cuda')
             self.gather_ids_cuda = torch.empty((self.max_num_tokens, ),
                                                dtype=torch.int,
                                                device='cuda')
@@ -1186,7 +1189,7 @@ class PyTorchModelEngine(ModelEngine):
         """
         Prepare inputs for Pytorch Model.
         """
-        new_tokens_device, new_tokens_lens_device, next_draft_tokens_device = None, None, None
+        new_tokens_device, new_tokens_lens_device, next_draft_tokens_device, next_draft_probs_device = None, None, None, None
         if new_tensors_device is not None:
             # speculative decoding cases: [batch, 1 + draft_len], others: [batch]
             new_tokens_device = new_tensors_device.new_tokens
@@ -1195,6 +1198,8 @@ class PyTorchModelEngine(ModelEngine):
                 assert self.enable_spec_decode and not self.is_draft_model
                 new_tokens_lens_device = new_tensors_device.new_tokens_lens  # [batch]
                 next_draft_tokens_device = new_tensors_device.next_draft_tokens  # [batch, draft_len]
+                next_draft_probs_device = new_tensors_device.next_draft_probs  # [batch, draft_len]
+                assert next_draft_probs_device is not None
 
         # Must be before the update of py_batch_idx
         if self.guided_decoder is not None:
@@ -1210,6 +1215,7 @@ class PyTorchModelEngine(ModelEngine):
         position_ids = []  # per sequence
         num_cached_tokens_per_seq = []  # per sequence
         draft_tokens = []
+        draft_probs = []
         draft_lens = []
         gen_request_seq_slots = []  # per generation request
         multimodal_params_list = []
@@ -1320,6 +1326,7 @@ class PyTorchModelEngine(ModelEngine):
                     input_ids.append(request.get_last_tokens(0))
                     input_ids.extend(request.py_draft_tokens)
                     draft_tokens.extend(request.py_draft_tokens)
+                    draft_probs.extend(request.py_draft_token)
                 # get other ids and lengths
                 num_draft_tokens = get_draft_token_length(request)
                 past_seen_token_num = request.max_beam_num_tokens - 1
@@ -1499,8 +1506,13 @@ class PyTorchModelEngine(ModelEngine):
             draft_tokens = torch.tensor(draft_tokens,
                                         dtype=torch.int,
                                         pin_memory=True)
+            draft_probs = torch.tensor(draft_probs,
+                                        dtype=torch.float,
+                                        pin_memory=True)
             self.draft_tokens_cuda[:len(draft_tokens)].copy_(draft_tokens,
                                                              non_blocking=True)
+            self.draft_probs_cuda[:len(draft_probs)].copy_(draft_probs,
+                                                              non_blocking=True)
         if self.is_spec_decode and len(num_accepted_draft_tokens) > 0:
             num_accepted_draft_tokens = torch.tensor(num_accepted_draft_tokens,
                                                      dtype=torch.int,
@@ -1530,6 +1542,11 @@ class PyTorchModelEngine(ModelEngine):
                                            next_draft_tokens_device[
                                                previous_slots, :].flatten(),
                                            non_blocking=True)
+                self.draft_probs_cuda[num_draft_tokens:num_draft_tokens +
+                                        previous_batch_draft_tokens].copy_(
+                                            next_draft_probs_device[
+                                                previous_slots, :].flatten(),
+                                            non_blocking=True)
                 # prepare data for the preprocess inputs
                 kv_len_offsets_device = new_tokens_lens_device - self.runtime_draft_len - 1
                 previous_pos_indices_host = torch.tensor(previous_pos_indices,
@@ -1699,6 +1716,8 @@ class PyTorchModelEngine(ModelEngine):
             total_draft_lens = sum(draft_lens)
             spec_metadata.draft_tokens = self.draft_tokens_cuda[:
                                                                 total_draft_lens]
+            spec_metadata.draft_probs = self.draft_probs_cuda[:
+                                                              total_draft_lens]
             spec_metadata.request_ids = request_ids
             spec_metadata.gather_ids = self.gather_ids_cuda[:len(gather_ids)]
             spec_metadata.num_generations = len(

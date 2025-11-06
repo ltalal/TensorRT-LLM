@@ -526,6 +526,10 @@ def int_tensor(shape: tuple[int, ...], device: str = 'cuda') -> torch.Tensor:
     return torch.empty(shape, dtype=torch.int, device=device)
 
 
+def float_tensor(shape: tuple[int, ...], device: str = 'cuda') -> torch.Tensor:
+    return torch.empty(shape, dtype=torch.float, device=device)
+
+
 @dataclass(kw_only=True, frozen=True)
 class _BatchedSamplingResult:
     # Original request indices for all requests (permuted due to batching by strategy):

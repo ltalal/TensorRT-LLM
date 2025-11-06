@@ -164,6 +164,7 @@ class SpecMetadata:
     spec_dec_mode: SpeculativeDecodingMode = SpeculativeDecodingMode.NONE
     # Draft tokens.
     draft_tokens: Optional[torch.Tensor] = None
+    draft_probs: Optional[torch.Tensor] = None
     # The length of the draft tokens.
     draft_lens: Optional[torch.Tensor] = None
     # The request ID of each sequence in the batch.

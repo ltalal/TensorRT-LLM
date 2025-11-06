@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import os
 from typing import TYPE_CHECKING, List, Optional
 
 import torch
@@ -14,7 +15,7 @@ from ..pyexecutor.guided_decoder import CapturableGuidedDecoder
 from ..pyexecutor.llm_request import LlmRequest, LlmRequestState
 from ..pyexecutor.resource_manager import BaseResourceManager, SlotManager
 from ..pyexecutor.sampler import (SampleState, SampleStateTensors, TorchSampler,
-                                  add_token, int_tensor)
+                                  add_token, int_tensor, float_tensor)
 from ..pyexecutor.scheduler import ScheduledRequests
 from .interface import SpecMetadata
 
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
 class SampleStateTensorsMTP(SampleStateTensors):
     new_tokens_lens: torch.Tensor
     next_draft_tokens: torch.Tensor
+    next_draft_probs: Optional[torch.Tensor] = None
 
 
 @dataclass(kw_only=True)
@@ -225,6 +227,7 @@ class MTPSampler(TorchSampler):
     class Store(TorchSampler.Store):
         next_new_tokens: torch.Tensor
         next_draft_tokens: torch.Tensor
+        next_draft_probs: torch.Tensor
         new_tokens_lens: torch.Tensor
         max_total_draft_tokens: torch.Tensor
 
@@ -236,6 +239,7 @@ class MTPSampler(TorchSampler):
             new_tokens=int_tensor(self.NEW_TOKENS_SHAPE),
             next_new_tokens=int_tensor(self.NEW_TOKENS_SHAPE),
             next_draft_tokens=int_tensor((seq_slots, draft_len)),
+            next_draft_probs=float_tensor((seq_slots, draft_len)),
             new_tokens_lens=int_tensor((seq_slots, )),
             max_total_draft_tokens=int_tensor((seq_slots, draft_len)),
         )
@@ -296,26 +300,31 @@ class MTPSampler(TorchSampler):
         o_new_tokens_lens = outputs['new_tokens_lens'][:len(requests)]
         o_next_draft_tokens = outputs['next_draft_tokens'][:len(requests)]
         o_next_new_tokens = outputs['next_new_tokens'][:len(requests)]
+        o_next_draft_probs = outputs['next_draft_probs'][:len(requests)]
 
         new_tokens = self.store.new_tokens
         next_new_tokens = self.store.next_new_tokens
         new_tokens_lens = self.store.new_tokens_lens
         next_draft_tokens = self.store.next_draft_tokens
+        next_draft_probs = self.store.next_draft_probs
 
         new_tokens.squeeze(-1).T.index_copy_(0, slots, o_new_tokens)
         next_new_tokens.squeeze(-1).T.index_copy_(0, slots, o_next_new_tokens)
         new_tokens_lens.index_copy_(0, slots, o_new_tokens_lens)
         next_draft_tokens.index_copy_(0, slots, o_next_draft_tokens)
+        next_draft_probs.index_copy_(0, slots, o_next_draft_probs)
 
         device = SampleStateTensorsMTP(
             new_tokens=next_new_tokens,
             new_tokens_lens=new_tokens_lens,
             next_draft_tokens=next_draft_tokens,
+            next_draft_probs=next_draft_probs,
         )
         host = SampleStateTensorsMTP(
             new_tokens=new_tokens.to('cpu', non_blocking=True),
             new_tokens_lens=new_tokens_lens.to('cpu', non_blocking=True),
             next_draft_tokens=next_draft_tokens.to('cpu', non_blocking=True),
+            next_draft_probs=next_draft_probs.to('cpu', non_blocking=True),
         )
         sampler_event = torch.cuda.Event()
         sampler_event.record()
@@ -337,6 +346,8 @@ class MTPWorker(nn.Module):
         self.model_config = model_config
         self.is_thop = False
         self.guided_decoder: Optional[CapturableGuidedDecoder] = None
+        self.enable_non_greedy_sampling = os.environ.get("ENABLE_NON_GREEDY_SAMPLING", "0") == "1"
+        print("ENABLE_NON_GREEDY_SAMPLING =", self.enable_non_greedy_sampling)
 
     def forward(
         self,
@@ -500,7 +511,7 @@ class MTPWorker(nn.Module):
             if self.guided_decoder is not None:
                 self.guided_decoder.execute_draft_batch(logits, draft_step=i)
 
-            new_draft_token = self.draft_sampler(logits)
+            new_draft_token, new_draft_probs = self.draft_sampler(logits, enable_non_greedy_sampling=self.enable_non_greedy_sampling)
             next_draft_tokens.append(new_draft_token)
             # shift input_ids and hidden_states
             input_ids = draft_inputs["input_ids"]
@@ -868,6 +879,7 @@ class MTPWorker(nn.Module):
                     logits, spec_metadata.draft_tokens, target_tokens_cache,
                     mtp_num_modules, batch_size, num_contexts, logits.shape[-1])
             else:
+                # print("Spec Metadata: ", spec_metadata)
                 # Do greedy sampling for the input logits
                 target_tokens = torch.argmax(logits, dim=-1)
 
@@ -1104,6 +1116,7 @@ class MTPWorker(nn.Module):
         self,
         logits: torch.Tensor,
         mapping_lm_head_tp: Mapping = None,
+        enable_non_greedy_sampling: bool = False
     ):
         '''
         Sampling draft tokens.
@@ -1122,9 +1135,23 @@ class MTPWorker(nn.Module):
                 and hasattr(self.model_config, 'mapping')
                 and self.model_config.mapping.tp_size
                 > 1) and not (self.model_config.mapping.enable_attention_dp):
-            combined = self.get_local_max_and_combined(logits)
-            gathered = allgather(combined, self.model_config.mapping, dim=-1)
-            draft_tokens = self.get_draft_tokens_from_gathered(gathered)
+            if not enable_non_greedy_sampling:
+                combined = self.get_local_max_and_combined(logits)
+                gathered = allgather(combined, self.model_config.mapping, dim=-1)
+                draft_tokens = self.get_draft_tokens_from_gathered(gathered)
+                draft_probs = torch.ones_like(draft_tokens, dtype=torch.float32)
+            else:
+                gathered_logits: torch.Tensor = allgather(logits, self.model_config.mapping, dim=-1)
+                probs = torch.softmax(gathered_logits, dim=-1)
+                draft_tokens = torch.multinomial(probs, num_samples=1).to(torch.int32)
+                draft_tokens_gathered = allgather(draft_tokens, self.model_config.mapping, dim=-1)
+                draft_tokens = draft_tokens_gathered[..., 0]
+                # draft_probs = probs[range(len(probs)), draft_tokens].to(torch.float32)
+                draft_probs = torch.gather(
+                    probs,
+                    dim=-1,
+                    index=draft_tokens.unsqueeze(-1),
+                ).squeeze(-1).to(torch.float32)
         elif (self.model_config is not None
               and hasattr(self.model_config, 'mapping')
               and self.model_config.mapping.tp_size
@@ -1139,11 +1166,12 @@ class MTPWorker(nn.Module):
                                      local_batch_size, -1)
             sliced_gathered = gathered[mapping_lm_head_tp.tp_rank]
             draft_tokens = self.get_draft_tokens_from_gathered(sliced_gathered)
+            draft_probs = torch.ones_like(draft_tokens, dtype=torch.float32)
         else:
             # Simple argmax if no TP or no model config
             draft_tokens = torch.argmax(logits, dim=-1).type(torch.int32)
-
-        return draft_tokens
+            draft_probs = torch.ones_like(draft_tokens, dtype=torch.float32)
+        return draft_tokens, draft_probs
 
     def set_guided_decoder(self,
                            guided_decoder: CapturableGuidedDecoder) -> bool:
@@ -1161,7 +1189,7 @@ class MTPEagleWorker(MTPWorker):
         self.mtp_num_modules = spec_config.num_nextn_predict_layers
 
     @torch.compile(options={"max-autotune": True})
-    def update_draft_tokens(self, next_draft_tokens, new_draft_token,
+    def update_draft_tokens(self, next_draft_tokens, new_draft_token, 
                             hidden_states, gather_ids, inputs):
         next_draft_tokens.append(new_draft_token)
         # update inputs
@@ -1215,6 +1243,7 @@ class MTPEagleWorker(MTPWorker):
 
         # Predict draft tokens
         next_draft_tokens = []
+        next_draft_probs = []
         for i in range(self.mtp_num_modules):
             if i == 0:
                 hidden_states = draft_model.mtp_layers[0](
@@ -1276,14 +1305,15 @@ class MTPEagleWorker(MTPWorker):
                 getattr(self.model_config.mapping, 'enable_lm_head_tp_in_adp', False):
                 mapping_lm_head_tp = draft_model.mtp_layers[
                     0].shared_head.mapping_lm_head_tp
-                new_draft_token = self.draft_sampler(logits, mapping_lm_head_tp)
+                new_draft_token, new_draft_prob = self.draft_sampler(logits, mapping_lm_head_tp, enable_non_greedy_sampling=self.enable_non_greedy_sampling)
                 new_draft_token = new_draft_token[:token_count]
             else:
-                new_draft_token = self.draft_sampler(logits)
+                new_draft_token, new_draft_prob = self.draft_sampler(logits, enable_non_greedy_sampling=self.enable_non_greedy_sampling)
 
             hidden_states, position_ids = self.update_draft_tokens(
                 next_draft_tokens, new_draft_token, hidden_states, gather_ids,
                 inputs)
+            next_draft_probs.append(new_draft_prob)
             # update attn_metadata
             if i == 0:
                 attn_metadata._seq_lens[:batch_size].fill_(1)
@@ -1330,19 +1360,20 @@ class MTPEagleWorker(MTPWorker):
         attn_metadata.on_update()
 
         @torch.compile(options={"max-autotune": True})
-        def prepare_next_tokens(next_draft_tokens, accepted_tokens,
+        def prepare_next_tokens(next_draft_tokens, next_draft_probs, accepted_tokens,
                                 spec_metadata, batch_size, num_accepted_tokens):
             next_draft_tokens = torch.stack(next_draft_tokens, dim=1)
+            next_draft_probs = torch.stack(next_draft_probs, dim=1)
             # prepare next new tokens to support overlap scheduler
             next_new_tokens = accepted_tokens[
                 spec_metadata.batch_indices_cuda[:batch_size],
                 num_accepted_tokens - 1].unsqueeze(1)
             next_new_tokens = torch.concat([next_new_tokens, next_draft_tokens],
                                            dim=1)
-            return next_draft_tokens, next_new_tokens
+            return next_draft_tokens, next_new_tokens, next_draft_probs
 
-        next_draft_tokens, next_new_tokens = prepare_next_tokens(
-            next_draft_tokens, accepted_tokens, spec_metadata, batch_size,
+        next_draft_tokens, next_new_tokens, next_draft_probs = prepare_next_tokens(
+            next_draft_tokens, next_draft_probs, accepted_tokens, spec_metadata, batch_size,
             num_accepted_tokens)
 
         return {
@@ -1350,6 +1381,7 @@ class MTPEagleWorker(MTPWorker):
             'new_tokens': accepted_tokens,
             'new_tokens_lens': num_accepted_tokens,
             'next_draft_tokens': next_draft_tokens,
+            'next_draft_probs': next_draft_probs,
             'next_new_tokens': next_new_tokens
         }
 
