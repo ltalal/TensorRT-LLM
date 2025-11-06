@@ -737,6 +737,10 @@ class MTPWorker(nn.Module):
         gen_logits = logits[num_contexts:]
         gen_logprobs = torch.softmax(gen_logits, dim=-1)
         return gen_logprobs
+
+    def broadcast(self, tensor: torch.Tensor, src: int = 0) -> torch.Tensor:
+        tensor_gathered = allgather(tensor.unsqueeze(-1), mapping=self.model_config.mapping, dim=-1)
+        return tensor_gathered[..., src]
     
     def sample_and_accept_draft_tokens(
         self,
@@ -901,7 +905,6 @@ class MTPWorker(nn.Module):
                 else:
                     target_probs = torch.softmax(logits, dim=-1)
                     target_tokens = torch.multinomial(target_probs, num_samples=1).squeeze(-1)
-                    print(f"Target tokens sampled {target_tokens}")
                     accepted_tokens[:num_contexts, 0] = target_tokens[:num_contexts]
 
                     draft_tokens = spec_metadata.draft_tokens.reshape(
@@ -919,6 +922,7 @@ class MTPWorker(nn.Module):
                     print("Draft tokens: ", draft_tokens)
                     print("Draft probs: ", draft_probs)
                     print("Gen target selected probs: ", gen_target_selected_probs)
+                    print(f"Target tokens sampled {target_tokens}")
                     acceptance_probs = gen_target_selected_probs / (draft_probs + 1e-6)
                     print("Acceptance probabilities: ", acceptance_probs)
                     accepted_flag = torch.cumprod(
@@ -934,6 +938,8 @@ class MTPWorker(nn.Module):
                         accepted_tokens[num_contexts:, :mtp_num_modules]
                     )
                     num_accepted_tokens[num_contexts:] += accepted_flag.sum(1)
+                    accepted_tokens = self.broadcast(accepted_tokens)
+                    num_accepted_tokens = self.broadcast(num_accepted_tokens)
                     print(f"Accepted tokens: {accepted_tokens}, num accepted tokens: {num_accepted_tokens}")
         return accepted_tokens, num_accepted_tokens
 
@@ -1181,9 +1187,8 @@ class MTPWorker(nn.Module):
             else:
                 gathered_logits: torch.Tensor = allgather(logits, self.model_config.mapping, dim=-1)
                 probs = torch.softmax(gathered_logits, dim=-1)
-                draft_tokens = torch.multinomial(probs, num_samples=1).to(torch.int32)
-                draft_tokens_gathered = allgather(draft_tokens, self.model_config.mapping, dim=-1)
-                draft_tokens = draft_tokens_gathered[..., 0]
+                draft_tokens = torch.multinomial(probs, num_samples=1).to(torch.int32).squeeze(-1)
+                draft_tokens = self.broadcast(draft_tokens)
                 # draft_probs = probs[range(len(probs)), draft_tokens].to(torch.float32)
                 draft_probs = torch.gather(
                     probs,
