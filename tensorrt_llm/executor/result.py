@@ -997,7 +997,6 @@ def _process_req_perf_metrics(
             RequestEventTiming.LAST_TOKEN_TIME, 0) - req_perf_metrics_dict.get(
                 RequestEventTiming.FIRST_TOKEN_TIME, 0)) / (output_length - 1)
         stat.update({MetricNames.TPOT: tpot})
-    print("REQ PERF METRICS DICT:", req_perf_metrics_dict)
     if spec_decode_acceptance_rate := req_perf_metrics_dict.get("acceptance_rate"):
         stat[MetricNames.SPEC_DECODE_DRAFT_ACCEPTANCE_RATE] = spec_decode_acceptance_rate
     if spec_decode_accepted_tokens := req_perf_metrics_dict.get("total_accepted_draft_tokens", 0):
