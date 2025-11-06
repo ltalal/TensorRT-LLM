@@ -737,7 +737,7 @@ class MTPWorker(nn.Module):
         gen_logits = logits[num_contexts:]
         gen_logprobs = torch.softmax(gen_logits, dim=-1)
         return gen_logprobs
-
+    
     def sample_and_accept_draft_tokens(
         self,
         input_ids: torch.IntTensor,
@@ -879,24 +879,62 @@ class MTPWorker(nn.Module):
                     logits, spec_metadata.draft_tokens, target_tokens_cache,
                     mtp_num_modules, batch_size, num_contexts, logits.shape[-1])
             else:
-                # print("Spec Metadata: ", spec_metadata)
+                print("Logits shape: ", logits.shape)
+                print("Draft tokens shape: ", spec_metadata.draft_tokens.shape)
+                print("Draft probs shape: ", spec_metadata.draft_probs.shape)
+                print(f"num contexts: {num_contexts}, num gens: {num_gens}, mtp num modules: {mtp_num_modules}")
                 # Do greedy sampling for the input logits
-                target_tokens = torch.argmax(logits, dim=-1)
+                if not self.enable_non_greedy_sampling:
+                    target_tokens = torch.argmax(logits, dim=-1)
+                    # context
+                    accepted_tokens[:num_contexts, 0] = target_tokens[:num_contexts]
+                    # generation
+                    gen_target_tokens = target_tokens[num_contexts:].reshape(
+                        num_gens, mtp_num_modules + 1)
+                    accepted_tokens[num_contexts:, :] = gen_target_tokens
+                    draft_tokens = spec_metadata.draft_tokens.reshape(
+                        num_gens, mtp_num_modules)
+                    num_accepted_tokens[num_contexts:] += torch.cumprod(
+                        (draft_tokens == gen_target_tokens[:, :mtp_num_modules]
+                        ).int(),
+                        dim=-1).sum(1)
+                else:
+                    target_probs = torch.softmax(logits, dim=-1)
+                    target_tokens = torch.multinomial(target_probs, num_samples=1).squeeze(-1)
+                    print(f"Target tokens sampled {target_tokens}")
+                    accepted_tokens[:num_contexts, 0] = target_tokens[:num_contexts]
 
-                # context
-                accepted_tokens[:num_contexts, 0] = target_tokens[:num_contexts]
-
-                # generation
-                gen_target_tokens = target_tokens[num_contexts:].reshape(
-                    num_gens, mtp_num_modules + 1)
-                accepted_tokens[num_contexts:, :] = gen_target_tokens
-                draft_tokens = spec_metadata.draft_tokens.reshape(
-                    num_gens, mtp_num_modules)
-                num_accepted_tokens[num_contexts:] += torch.cumprod(
-                    (draft_tokens == gen_target_tokens[:, :mtp_num_modules]
-                     ).int(),
-                    dim=-1).sum(1)
-
+                    draft_tokens = spec_metadata.draft_tokens.reshape(
+                        num_gens, mtp_num_modules)
+                    draft_probs = spec_metadata.draft_probs.reshape(
+                        num_gens, mtp_num_modules
+                    )
+                    
+                    gen_target_probs = target_probs[num_contexts:].reshape(
+                        num_gens, mtp_num_modules + 1, target_probs.size(-1))[:, :mtp_num_modules, :]
+                    gen_target_selected_probs = gen_target_probs.gather(
+                        dim=-1,
+                        index=draft_tokens.unsqueeze(-1)
+                    ).squeeze(-1)
+                    print("Draft tokens: ", draft_tokens)
+                    print("Draft probs: ", draft_probs)
+                    print("Gen target selected probs: ", gen_target_selected_probs)
+                    acceptance_probs = gen_target_selected_probs / (draft_probs + 1e-6)
+                    print("Acceptance probabilities: ", acceptance_probs)
+                    accepted_flag = torch.cumprod(
+                        (torch.rand_like(acceptance_probs) <= acceptance_probs).int(),
+                        dim=-1,
+                    )
+                    gen_target_tokens = target_tokens[num_contexts:].reshape(
+                        num_gens, mtp_num_modules + 1)
+                    accepted_tokens[num_contexts:, :] = gen_target_tokens
+                    accepted_tokens[num_contexts:, :mtp_num_modules] = torch.where(
+                        accepted_flag == 1,
+                        draft_tokens,
+                        accepted_tokens[num_contexts:, :mtp_num_modules]
+                    )
+                    num_accepted_tokens[num_contexts:] += accepted_flag.sum(1)
+                    print(f"Accepted tokens: {accepted_tokens}, num accepted tokens: {num_accepted_tokens}")
         return accepted_tokens, num_accepted_tokens
 
     def change_attn_metadata(self, num_accepted_tokens: torch.Tensor,

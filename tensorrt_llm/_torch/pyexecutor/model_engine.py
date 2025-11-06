@@ -1326,7 +1326,7 @@ class PyTorchModelEngine(ModelEngine):
                     input_ids.append(request.get_last_tokens(0))
                     input_ids.extend(request.py_draft_tokens)
                     draft_tokens.extend(request.py_draft_tokens)
-                    draft_probs.extend(request.py_draft_token)
+                    draft_probs.extend(request.py_draft_tokens)
                 # get other ids and lengths
                 num_draft_tokens = get_draft_token_length(request)
                 past_seen_token_num = request.max_beam_num_tokens - 1
