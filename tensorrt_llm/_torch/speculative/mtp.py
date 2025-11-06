@@ -347,7 +347,12 @@ class MTPWorker(nn.Module):
         self.is_thop = False
         self.guided_decoder: Optional[CapturableGuidedDecoder] = None
         self.enable_non_greedy_sampling = os.environ.get("ENABLE_NON_GREEDY_SAMPLING", "0") == "1"
+        self.non_greedy_sampling_temp = max(
+            float(os.environ.get("NON_GREEDY_SAMPLING_TEMPERATURE", "1.0")),
+            1e-5
+        )
         print("ENABLE_NON_GREEDY_SAMPLING =", self.enable_non_greedy_sampling)
+        print("NON_GREEDY_SAMPLING_TEMPERATURE =", self.non_greedy_sampling_temp)
 
     def forward(
         self,
@@ -883,10 +888,6 @@ class MTPWorker(nn.Module):
                     logits, spec_metadata.draft_tokens, target_tokens_cache,
                     mtp_num_modules, batch_size, num_contexts, logits.shape[-1])
             else:
-                print("Logits shape: ", logits.shape)
-                print("Draft tokens shape: ", spec_metadata.draft_tokens.shape)
-                print("Draft probs shape: ", spec_metadata.draft_probs.shape)
-                print(f"num contexts: {num_contexts}, num gens: {num_gens}, mtp num modules: {mtp_num_modules}")
                 # Do greedy sampling for the input logits
                 if not self.enable_non_greedy_sampling:
                     target_tokens = torch.argmax(logits, dim=-1)
@@ -903,7 +904,7 @@ class MTPWorker(nn.Module):
                         ).int(),
                         dim=-1).sum(1)
                 else:
-                    target_probs = torch.softmax(logits, dim=-1)
+                    target_probs = torch.softmax(logits / self.non_greedy_sampling_temp, dim=-1)
                     target_tokens = torch.multinomial(target_probs, num_samples=1).squeeze(-1)
                     accepted_tokens[:num_contexts, 0] = target_tokens[:num_contexts]
 
@@ -919,12 +920,10 @@ class MTPWorker(nn.Module):
                         dim=-1,
                         index=draft_tokens.unsqueeze(-1)
                     ).squeeze(-1)
-                    print("Draft tokens: ", draft_tokens)
-                    print("Draft probs: ", draft_probs)
-                    print("Gen target selected probs: ", gen_target_selected_probs)
-                    print(f"Target tokens sampled {target_tokens}")
-                    acceptance_probs = gen_target_selected_probs / (draft_probs + 1e-6)
-                    print("Acceptance probabilities: ", acceptance_probs)
+                    acceptance_probs = torch.clamp_max(
+                        gen_target_selected_probs / (draft_probs + 1e-6),
+                        max=1.0
+                    )
                     accepted_flag = torch.cumprod(
                         (torch.rand_like(acceptance_probs) <= acceptance_probs).int(),
                         dim=-1,
@@ -940,7 +939,6 @@ class MTPWorker(nn.Module):
                     num_accepted_tokens[num_contexts:] += accepted_flag.sum(1)
                     accepted_tokens = self.broadcast(accepted_tokens)
                     num_accepted_tokens = self.broadcast(num_accepted_tokens)
-                    print(f"Accepted tokens: {accepted_tokens}, num accepted tokens: {num_accepted_tokens}")
         return accepted_tokens, num_accepted_tokens
 
     def change_attn_metadata(self, num_accepted_tokens: torch.Tensor,
@@ -1185,7 +1183,7 @@ class MTPWorker(nn.Module):
                 draft_tokens = self.get_draft_tokens_from_gathered(gathered)
                 draft_probs = torch.ones_like(draft_tokens, dtype=torch.float32)
             else:
-                gathered_logits: torch.Tensor = allgather(logits, self.model_config.mapping, dim=-1)
+                gathered_logits: torch.Tensor = allgather(logits / self.non_greedy_sampling_temp, self.model_config.mapping, dim=-1)
                 probs = torch.softmax(gathered_logits, dim=-1)
                 draft_tokens = torch.multinomial(probs, num_samples=1).to(torch.int32).squeeze(-1)
                 draft_tokens = self.broadcast(draft_tokens)
