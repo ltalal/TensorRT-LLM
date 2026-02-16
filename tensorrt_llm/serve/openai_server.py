@@ -672,6 +672,13 @@ class OpenAIServer:
                     self.perf_metrics.append(item)
 
     async def openai_chat(self, request: ChatCompletionRequest, raw_request: Request) -> Response:
+        # Validate logprobs is not requested with speculative decoding
+        if (request.logprobs or request.top_logprobs) and self.llm.args.speculative_config is not None:
+            return self.create_error_response(
+                message="logprobs is not supported with speculative decoding",
+                err_type="BadRequestError",
+                status_code=HTTPStatus.BAD_REQUEST
+            )
 
         def get_role() -> str:
             if request.add_generation_prompt:
@@ -889,6 +896,13 @@ class OpenAIServer:
             return self.create_error_response(str(e))
 
     async def openai_completion(self, request: CompletionRequest, raw_request: Request) -> Response:
+        # Validate logprobs is not requested with speculative decoding
+        if request.logprobs and self.llm.args.speculative_config is not None:
+            return self.create_error_response(
+                message="logprobs is not supported with speculative decoding",
+                err_type="BadRequestError",
+                status_code=HTTPStatus.BAD_REQUEST
+            )
 
         async def completion_response(promise: RequestOutput,
                                       postproc_params: Optional[PostprocParams]) -> CompletionResponse:
