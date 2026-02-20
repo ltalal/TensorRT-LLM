@@ -1177,9 +1177,8 @@ class MTPDecodingConfig(DecodingBaseConfig):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         if 'num_nextn_predict_layers' in kwargs:
-            self.max_draft_len = kwargs['num_nextn_predict_layers']
-            self.max_total_draft_tokens = kwargs[
-                'num_nextn_predict_layers']  # Current MTP only support linear tree
+            self.max_draft_len = self.num_nextn_predict_layers
+            self.max_total_draft_tokens = self.num_nextn_predict_layers  # Current MTP only support linear tree
 
     @classmethod
     def from_dict(cls, data: dict):
