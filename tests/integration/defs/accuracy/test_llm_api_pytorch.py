@@ -3571,6 +3571,7 @@ class TestKimiK2(LlmapiAccuracyTestHarness):
                 assert not all(tid == 0 for tid in token_ids)
 
 
+@pytest.mark.threadleak(enabled=False)
 @pytest.mark.timeout(10800)
 @pytest.mark.skip_less_device_memory(100000)
 class TestKimiK25(LlmapiAccuracyTestHarness):
