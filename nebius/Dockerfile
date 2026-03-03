@@ -7,7 +7,8 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy the main patch file
+# Copy version.py and the main patch file
+COPY version.py /version.py
 COPY patch.txt /patch.txt
 WORKDIR /
 
@@ -18,6 +19,8 @@ SHELL ["/bin/bash", "-e", "-c"]
 RUN if [ -s /patch.txt ]; then \
       PYTHON_SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])") && \
       echo "Python packages located at: $PYTHON_SITE_PACKAGES" && \
+      echo "Copying version.py to $PYTHON_SITE_PACKAGES/tensorrt_llm/version.py" && \
+      cp -f version.py $PYTHON_SITE_PACKAGES/tensorrt_llm/version.py && \
       echo "Applying patch to packages in $PYTHON_SITE_PACKAGES" && \
       cd $PYTHON_SITE_PACKAGES && \
       if patch -p1 --dry-run < /patch.txt > /dev/null 2>&1; then \

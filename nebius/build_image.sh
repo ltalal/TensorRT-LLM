@@ -11,7 +11,7 @@ fi
 image="nvcr.io/nvidia/tensorrt-llm/release"
 
 # Read version from version.py
-ver=$(grep '__version__' ../tensorrt_llm/version.py | cut -d'"' -f2)
+ver=$(grep '__version__' version.py | cut -d'"' -f2)
 
 # Split version into trtllm_ver and nb_ver by '+'
 if [[ "$ver" == *"+"* ]]; then
@@ -19,6 +19,14 @@ if [[ "$ver" == *"+"* ]]; then
     nb_ver="${ver#*+}"
 else
     echo "Error: Version format should be 'trtllm_ver+nb_ver', got: $ver"
+    exit 1
+fi
+
+# check that nebius version matches
+ver_trt=$(grep '__version__' ../tensorrt_llm/version.py | cut -d'"' -f2)
+
+if [ "$ver_trt" != "$trtllm_ver" ]; then
+    echo "Error: TensorRT-LLM version mismatch: nebius/version.py has trtllm_ver=$trtllm_ver but tensorrt_llm/version.py has __version__=$ver_trt"
     exit 1
 fi
 
