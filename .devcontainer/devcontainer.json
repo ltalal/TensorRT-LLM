@@ -19,7 +19,7 @@
       // Note: sourcing .profile is required since we use a local user and the python interpreter is
       // global (/usr/bin/python). In this case, pip will default to a local user path which is not
       // by default in the PATH. In interactive devcontainer shells, .profile is sourced by default.
-      "postCreateCommand": "mkdir -p $HOME/.local/bin /workspaces/tensorrt_llm/.cache && source $HOME/.profile && TRTLLM_USE_PRECOMPILED=1 pip install -e . && pip install torch==2.9.1 torchvision --index-url https://download.pytorch.org/whl/cu130 && pre-commit install --install-hooks && mkdir -p /home/ubuntu/.cache/pip && chown -R ubuntu:ubuntu /home/ubuntu/.cache && chown -R ubuntu:ubuntu /workspaces/tensorrt_llm/.cache && chown -R ubuntu:ubuntu /home/ubuntu/scratch.trt_llm_data_ci/",
+      "postCreateCommand": "mkdir -p $HOME/.local/bin /workspaces/tensorrt_llm/.cache && source $HOME/.profile && sudo chown -R ubuntu:ubuntu /home/ubuntu/.cache /workspaces/tensorrt_llm/.cache /home/ubuntu/scratch.trt_llm_data_ci/ && mkdir -p /home/ubuntu/.cache/pip && pip install -r requirements-dev.txt && pre-commit install --install-hooks",
       "customizations": {
         "vscode": {
           "extensions": [
