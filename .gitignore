@@ -105,3 +105,6 @@ enroot/tensorrt_llm.devel.sqsh
 
 # MacOSX Files
 .DS_Store
+
+# Nebius
+nebius/patch.txt
