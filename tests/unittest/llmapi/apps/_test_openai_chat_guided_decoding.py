@@ -9,6 +9,7 @@ import jsonschema
 import openai
 import pytest
 import yaml
+from pydantic import BaseModel
 from utils.llm_data import llm_datasets_root
 
 from ..test_llm import get_model_path
@@ -441,3 +442,31 @@ You are a helpful assistant."""
                       message.content)
     params = json.loads(match.group(1))
     jsonschema.validate(params, tool_get_current_date["function"]["parameters"])
+
+
+def test_openai_compatible_json_schema2(client: openai.OpenAI, model_name: str):
+
+    class Person(BaseModel):
+        name: str
+
+    completion = client.beta.chat.completions.parse(
+        model=model_name,
+        messages=[
+            {
+                "role": "system",
+                "content": ("Extract the person's name from the user's text"),
+            },
+            {
+                "role": "user",
+                "content": "His name is Kek."
+            },
+        ],
+        max_completion_tokens=64,
+        top_p=0.01,
+        temperature=0.0,
+        response_format=Person,
+    )
+
+    parsed = completion.choices[0].message.parsed
+    assert parsed is not None
+    assert parsed.name.lower() == "kek"
