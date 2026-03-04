@@ -98,8 +98,8 @@ def is_non_default_or_required(param_name, value, backend):
     2. Different from its default value in the backend's LlmArgs class
     """
     always_include = {
-        "model", "backend", "tokenizer", "custom_tokenizer",
-        "postprocess_tokenizer_dir"
+        "model", "served_model_name", "backend", "tokenizer",
+        "custom_tokenizer", "postprocess_tokenizer_dir"
     }
 
     if param_name in always_include:
@@ -130,6 +130,7 @@ def is_non_default_or_required(param_name, value, backend):
 
 def get_llm_args(
         model: str,
+        served_model_name: Optional[str] = None,
         tokenizer: Optional[str] = None,
         custom_tokenizer: Optional[str] = None,
         backend: str = "pytorch",
@@ -177,6 +178,8 @@ def get_llm_args(
     cli_maybe_overrides = {
         "model":
         model,
+        "served_model_name":
+        served_model_name,
         "backend":
         backend,
         "tokenizer":
@@ -258,7 +261,7 @@ def launch_server(
         multimodal_server_config: Optional[MultimodalServerConfig] = None):
 
     backend = llm_args["backend"]
-    model = llm_args["model"]
+    model = llm_args.pop("served_model_name") or llm_args["model"]
     addr_info = socket.getaddrinfo(host, port, socket.AF_UNSPEC,
                                    socket.SOCK_STREAM)
     address_family = socket.AF_INET6 if all(
@@ -504,6 +507,10 @@ class ChoiceWithAlias(click.Choice):
 
 @click.command("serve")
 @click.argument("model", type=str)
+@click.option("--served_model_name",
+              type=str,
+              default=None,
+              help="The model name used in the API.")
 @click.option("--tokenizer",
               type=str,
               default=None,
@@ -718,23 +725,24 @@ class ChoiceWithAlias(click.Choice):
               help=help_info_with_stability_tag(
                   "Path to a YAML file with extra VISUAL_GEN model options.",
                   "prototype"))
-def serve(
-        model: str, tokenizer: Optional[str], custom_tokenizer: Optional[str],
-        host: str, port: int, log_level: str, backend: str, max_beam_width: int,
-        max_batch_size: int, max_num_tokens: int, max_seq_len: int,
-        tensor_parallel_size: int, pipeline_parallel_size: int,
-        context_parallel_size: int, moe_expert_parallel_size: Optional[int],
-        moe_cluster_parallel_size: Optional[int], gpus_per_node: Optional[int],
-        free_gpu_memory_fraction: float, num_postprocess_workers: int,
-        trust_remote_code: bool, revision: Optional[str],
-        extra_llm_api_options: Optional[str], reasoning_parser: Optional[str],
-        tool_parser: Optional[str], metadata_server_config_file: Optional[str],
-        server_role: Optional[str],
-        fail_fast_on_attention_window_too_large: bool,
-        otlp_traces_endpoint: Optional[str], enable_chunked_prefill: bool,
-        disagg_cluster_uri: Optional[str], media_io_kwargs: Optional[str],
-        custom_module_dirs: list[Path], chat_template: Optional[str],
-        grpc: bool, extra_visual_gen_options: Optional[str]):
+def serve(model: str, served_model_name: Optional[str],
+          tokenizer: Optional[str], custom_tokenizer: Optional[str], host: str,
+          port: int, log_level: str, backend: str, max_beam_width: int,
+          max_batch_size: int, max_num_tokens: int, max_seq_len: int,
+          tensor_parallel_size: int, pipeline_parallel_size: int,
+          context_parallel_size: int, moe_expert_parallel_size: Optional[int],
+          moe_cluster_parallel_size: Optional[int],
+          gpus_per_node: Optional[int], free_gpu_memory_fraction: float,
+          num_postprocess_workers: int, trust_remote_code: bool,
+          revision: Optional[str], extra_llm_api_options: Optional[str],
+          reasoning_parser: Optional[str], tool_parser: Optional[str],
+          metadata_server_config_file: Optional[str],
+          server_role: Optional[str],
+          fail_fast_on_attention_window_too_large: bool,
+          otlp_traces_endpoint: Optional[str], enable_chunked_prefill: bool,
+          disagg_cluster_uri: Optional[str], media_io_kwargs: Optional[str],
+          custom_module_dirs: list[Path], chat_template: Optional[str],
+          grpc: bool, extra_visual_gen_options: Optional[str]):
     """Running an OpenAI API compatible server
 
     MODEL: model name | HF checkpoint path | TensorRT engine path
@@ -753,6 +761,7 @@ def serve(
         nonlocal server_role
         llm_args, _ = get_llm_args(
             model=model,
+            served_model_name=served_model_name,
             tokenizer=tokenizer,
             custom_tokenizer=custom_tokenizer,
             backend=backend,
