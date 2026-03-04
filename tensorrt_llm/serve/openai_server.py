@@ -16,7 +16,7 @@ from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
 from typing import (Annotated, Any, AsyncGenerator, AsyncIterator, List,
-                    Optional, Union)
+                    Literal, Optional, Union)
 
 import uvicorn
 from fastapi import Body, FastAPI, Request
@@ -117,7 +117,8 @@ class OpenAIServer:
             metadata_server_cfg: MetadataServerConfig,
             disagg_cluster_config: Optional[DisaggClusterConfig] = None,
             multimodal_server_config: Optional[MultimodalServerConfig] = None,
-            chat_template: Optional[str] = None):
+            chat_template: Optional[str] = None,
+            check_stuck_requests: Literal["false", "true", "warn"] = "warn"):
         self.generator = generator
         self._is_visual_gen = isinstance(generator, VisualGen)
         self.tool_parser = tool_parser
@@ -143,6 +144,11 @@ class OpenAIServer:
         self.latest_stats = None
         # The steady clock offset (in seconds) between this server and the disagg server
         self.disagg_server_steady_clock_offset = 0
+        # Track requests with "GENERATION_COMPLETE" stage and their timestamps
+        self.stuck_requests_tracker = {}
+        # Time threshold for considering a request as stuck (in seconds)
+        self.stuck_requests_threshold = 60  # 1 minute
+        self.check_stuck_requests = check_stuck_requests
 
         # as disagg-worker
         self.disagg_cluster_storage = None
@@ -290,13 +296,61 @@ class OpenAIServer:
         if self.generator.args.return_perf_metrics:
             set_prometheus_multiproc_dir()
             self.metrics_collector = MetricsCollector({
-                "model_name": self.model,
-                "engine_type": "tensorrt_llm",
+                "model_name":
+                self.model,
+                "engine_type":
+                "tensorrt_llm",
             })
             max_perf_metrics = self.generator.args.perf_metrics_max_requests
             if max_perf_metrics > 0:
                 self.perf_metrics = deque(maxlen=max_perf_metrics)
                 self.perf_metrics_lock = asyncio.Lock()
+
+    def _check_stuck_requests(self) -> bool:
+        """
+        Check for stuck requests with "GENERATION_COMPLETE" stage.
+
+        Returns:
+            bool: True if stuck requests are found, False otherwise.
+        """
+        # Get the latest stats
+        stats = self.latest_stats
+        if stats is None:
+            return False
+
+        # Get current timestamp
+        current_time = time.monotonic()
+
+        # Get request stats
+        request_stats = stats.get("requestStats", [])
+
+        # Create a set of current GENERATION_COMPLETE request IDs
+        current_generation_complete_ids = set()
+        for request in request_stats:
+            if request.get("stage") == "GENERATION_COMPLETE":
+                request_id = request.get("id")
+                if request_id is not None:
+                    current_generation_complete_ids.add(request_id)
+
+                    # If this is a new GENERATION_COMPLETE request, track its timestamp
+                    if request_id not in self.stuck_requests_tracker:
+                        self.stuck_requests_tracker[request_id] = current_time
+
+        # Remove requests from tracker that are no longer in GENERATION_COMPLETE stage
+        tracked_ids = list(self.stuck_requests_tracker.keys())
+        for request_id in tracked_ids:
+            if request_id not in current_generation_complete_ids:
+                del self.stuck_requests_tracker[request_id]
+
+        # Check if any tracked requests have been stuck for too long
+        for request_id, timestamp in self.stuck_requests_tracker.items():
+            if current_time - timestamp > self.stuck_requests_threshold:
+                logger.error(
+                    f"Stuck request detected: request_id={request_id}, stuck_for={current_time - timestamp} seconds"
+                )
+                return True
+
+        return False
 
     async def await_disconnected(self, raw_request: Request, promise):
         if raw_request is None:
@@ -504,6 +558,15 @@ class OpenAIServer:
 
     async def health(self) -> Response:
         if self._check_health():
+            # Check for stuck requests (when enabled)
+            if self.check_stuck_requests == "true":
+                if self._check_stuck_requests():
+                    return Response(status_code=500,
+                                    content="Stuck requests detected")
+            elif self.check_stuck_requests == "warn":
+                if self._check_stuck_requests():
+                    logger.warning(
+                        "Stuck requests detected during health check")
             return Response(status_code=200)
         else:
             return Response(
@@ -540,6 +603,15 @@ class OpenAIServer:
 
             # Check if the response indicates success (status code 200)
             if response.status_code == 200:
+                # Check for stuck requests (when enabled)
+                if self.check_stuck_requests == "true":
+                    if self._check_stuck_requests():
+                        return Response(status_code=500,
+                                        content="Stuck requests detected")
+                elif self.check_stuck_requests == "warn":
+                    if self._check_stuck_requests():
+                        logger.warning(
+                            "Stuck requests detected during health_generate")
                 return Response(status_code=200,
                                 content="Generation health check OK")
             else:
