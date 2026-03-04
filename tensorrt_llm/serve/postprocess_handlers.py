@@ -336,13 +336,15 @@ def chat_response_post_processor(
 
         if args.tool_choice and isinstance(args.tool_choice,
                                            ChatCompletionNamedToolChoiceParam):
-            message = ChatMessage(
-                role=role,
-                content="",
-                tool_calls=[
-                    ToolCall(function=FunctionCall(
-                        name=args.tool_choice.function.name, arguments=text))
-                ])
+            _, calls = apply_tool_parser(args, output.index, text or "", False)
+            arguments = calls[0].parameters if calls else (text or "")
+            message = ChatMessage(role=role,
+                                  content="",
+                                  tool_calls=[
+                                      ToolCall(function=FunctionCall(
+                                          name=args.tool_choice.function.name,
+                                          arguments=arguments))
+                                  ])
         else:
             if text is None:
                 text = ""
