@@ -83,6 +83,25 @@ def process_req_perf_metrics(
     if output_length > 1 and first_token > 0 and last_token > 0:
         stat[MetricNames.TPOT] = (last_token - first_token) / (output_length - 1)
 
+    if (hit := req_perf_metrics_dict.get("kv_cache_hit_rate")) is not None:
+        stat[MetricNames.GPU_PREFIX_CACHE_HIT_RATE] = float(hit)
+
+    xfer_start = req_perf_metrics_dict.get(
+        RequestEventTiming.KV_CACHE_TRANSFER_START, 0) or 0
+    xfer_end = req_perf_metrics_dict.get(
+        RequestEventTiming.KV_CACHE_TRANSFER_END, 0) or 0
+    if xfer_end > xfer_start:
+        stat[MetricNames.KV_CACHE_TRANSFER_TIME] = xfer_end - xfer_start
+
+    if acc_rate := req_perf_metrics_dict.get("acceptance_rate"):
+        stat[MetricNames.SPEC_DECODE_DRAFT_ACCEPTANCE_RATE] = acc_rate
+    accepted_tok = req_perf_metrics_dict.get("total_accepted_draft_tokens", 0)
+    if accepted_tok:
+        stat[MetricNames.SPEC_DECODE_ACCEPTED_TOKENS] = accepted_tok
+    draft_tok = req_perf_metrics_dict.get("total_draft_tokens", 0)
+    if draft_tok:
+        stat[MetricNames.SPEC_DECODE_DRAFT_TOKENS] = draft_tok
+
     # Filter out non-positive values: negatives indicate clock-skew anomalies
     # and should not be reported; absent timestamps produce 0 which is filtered
     # here except for REQUEST_QUEUE_TIME (which is re-added below if valid).

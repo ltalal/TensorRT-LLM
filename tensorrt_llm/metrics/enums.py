@@ -15,7 +15,7 @@
 from enum import Enum
 
 
-class MetricNames(Enum):
+class MetricNames(str, Enum):
     TTFT = "ttft"
     TPOT = "tpot"
     E2E = "e2e"
@@ -26,6 +26,11 @@ class MetricNames(Enum):
     INFERENCE_TIME = "inference_time"
     PROMPT_TOKENS = "prompt_tokens"
     GENERATION_TOKENS = "generation_tokens"
+    GPU_PREFIX_CACHE_HIT_RATE = "gpu_prefix_cache_hit_rate"
+    KV_CACHE_TRANSFER_TIME = "kv_cache_transfer_time"
+    SPEC_DECODE_DRAFT_ACCEPTANCE_RATE = "spec_decode_draft_acceptance_rate"
+    SPEC_DECODE_ACCEPTED_TOKENS = "spec_decode_num_accepted_tokens"
+    SPEC_DECODE_DRAFT_TOKENS = "spec_decode_num_draft_tokens"
 
 
 class RequestEventTiming(Enum):
