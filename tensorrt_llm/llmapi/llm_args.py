@@ -1372,11 +1372,11 @@ class MTPDecodingConfig(DecodingBaseConfig):
         "Token ID marking end of thinking phase. Strict acceptance resumes after this."
     )
 
-    @model_validator(mode="after")
-    def set_max_total_draft_tokens(self):
-        self.max_draft_len = self.num_nextn_predict_layers
-        self.max_total_draft_tokens = self.num_nextn_predict_layers  # Current MTP only supports linear tree
-        return self
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if 'num_nextn_predict_layers' in kwargs:
+            self.max_draft_len = self.num_nextn_predict_layers
+            self.max_total_draft_tokens = self.num_nextn_predict_layers  # Current MTP only supports linear tree
 
     @model_validator(mode="after")
     def log_two_model_deprecation_warning(self):
