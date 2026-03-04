@@ -1,0 +1,8 @@
+cr.eu-north1.nebius.cloud/e00x1bqngdhpsezt4g/tensorrt_llm
+cr.eu-north1.nebius.cloud/e00czdswpf3xj9kzhd/tensorrt_llm
+cr.eu-west1.nebius.cloud/e01m2p9qh3x0mypsxf/tensorrt_llm
+cr.eu-west1.nebius.cloud/e01pxzygtfnc6w2hm1/tensorrt_llm
+cr.us-central1.nebius.cloud/u00kc13aqwwd4envj2/tensorrt_llm
+cr.us-central1.nebius.cloud/u00htn11daycbv4s97/tensorrt_llm
+cr.me-west1.nebius.cloud/i00r2xvvzb6zcanyg5/tensorrt_llm
+cr.me-west1.nebius.cloud/i00c0tcn1ts96t1gf3/tensorrt_llm
