@@ -266,7 +266,8 @@ def launch_server(
         server_role: Optional[ServerRole] = None,
         disagg_cluster_config: Optional[DisaggClusterConfig] = None,
         multimodal_server_config: Optional[MultimodalServerConfig] = None,
-        served_model_name: Optional[str] = None):
+        served_model_name: Optional[str] = None,
+        check_stuck_requests: str = "warn"):
 
     backend = llm_args["backend"]
     model = served_model_name or llm_args["model"]
@@ -308,7 +309,8 @@ def launch_server(
                               metadata_server_cfg=metadata_server_cfg,
                               disagg_cluster_config=disagg_cluster_config,
                               multimodal_server_config=multimodal_server_config,
-                              chat_template=chat_template)
+                              chat_template=chat_template,
+                              check_stuck_requests=check_stuck_requests)
 
         # Optionally disable GC (default: not disabled)
         if os.getenv("TRTLLM_SERVER_DISABLE_GC", "0") == "1":
@@ -465,6 +467,7 @@ def launch_visual_gen_server(
     model: str,
     diffusion_args: Optional[VisualGenArgs] = None,
     metadata_server_cfg: Optional[MetadataServerConfig] = None,
+    check_stuck_requests: str = "warn",
 ):
     """Launch a VISUAL_GEN model server for image/video generation.
 
@@ -492,7 +495,8 @@ def launch_visual_gen_server(
                           model=model,
                           server_role=ServerRole.VISUAL_GEN,
                           metadata_server_cfg=metadata_server_cfg,
-                          tool_parser=None)
+                          tool_parser=None,
+                          check_stuck_requests=check_stuck_requests)
     asyncio.run(server(host, port))
 
 
@@ -776,6 +780,15 @@ class ChoiceWithAlias(click.Choice):
               help=help_info_with_stability_tag(
                   "Path to a YAML file with extra VISUAL_GEN model options.",
                   "prototype"))
+@click.option(
+    "--check_stuck_requests",
+    type=click.Choice(("false", "true", "warn")),
+    default="warn",
+    help=help_info_with_stability_tag(
+        "Whether to check for stuck requests during health checks. "
+        "'warn' (default): check and log only, do not return 500. "
+        "'false': do not check. 'true': check and return 500 if stuck.",
+        "prototype"))
 def serve(
         model: str, tokenizer: Optional[str], custom_tokenizer: Optional[str],
         host: str, port: int, log_level: str, backend: str, max_beam_width: int,
@@ -794,7 +807,7 @@ def serve(
         media_io_kwargs: Optional[str], video_pruning_rate: Optional[float],
         custom_module_dirs: list[Path], chat_template: Optional[str],
         grpc: bool, served_model_name: Optional[str],
-        extra_visual_gen_options: Optional[str]):
+        extra_visual_gen_options: Optional[str], check_stuck_requests: str):
     """Running an OpenAI API compatible server
 
     MODEL: model name | HF checkpoint path | TensorRT engine path
@@ -952,7 +965,8 @@ def serve(
                           server_role,
                           disagg_cluster_config,
                           multimodal_server_config,
-                          served_model_name=served_model_name)
+                          served_model_name=served_model_name,
+                          check_stuck_requests=check_stuck_requests)
 
     def _serve_visual_gen():
         extra_args = {}
@@ -965,8 +979,12 @@ def serve(
         metadata_server_cfg = parse_metadata_server_config_file(
             metadata_server_config_file)
 
-        launch_visual_gen_server(host, port, model, diffusion_args,
-                                 metadata_server_cfg)
+        launch_visual_gen_server(host,
+                                 port,
+                                 model,
+                                 diffusion_args,
+                                 metadata_server_cfg,
+                                 check_stuck_requests=check_stuck_requests)
 
     if get_is_diffusion_model(model):
         _serve_visual_gen()
