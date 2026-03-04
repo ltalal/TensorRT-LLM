@@ -26,7 +26,7 @@ from .postproc_worker import (PostprocWorker, PostprocWorkerConfig,
                               postproc_worker_main)
 from .request import CancellingRequest, GenerationRequest
 from .rpc_worker_mixin import RpcWorkerMixin
-from .utils import ErrorResponse, RequestError, WorkerCommIpcAddrs
+from .utils import ErrorResponse, WorkerCommIpcAddrs
 
 __all__ = [
     "GenerationExecutorWorker",
@@ -327,11 +327,11 @@ def worker_main(
                     elif isinstance(req, GenerationRequest):
                         try:
                             worker.submit(req)
-                        except RequestError as e:
+                        except Exception as e:
                             logger.error(f"submit request failed: {e}")
                             logger.error(traceback.format_exc())
                             worker._await_response_helper.temp_error_responses.put(
-                                ErrorResponse(req.id, e, req.id))
+                                ErrorResponse(req.id, str(e), req.id))
                     else:
                         raise ValueError(f"Unknown request type: {type(req)}")
 
