@@ -1,0 +1,18 @@
+# Example .devcontainer/docker-compose.override.yml
+version: "3.9"
+services:
+  tensorrt_llm-dev:
+    # Explicit NVIDIA runtime (required if deploy.reservations doesn't work)
+    runtime: nvidia
+
+    environment:
+      - LLM_MODELS_ROOT=/home/ubuntu/scratch.trt_llm_data_ci/
+    volumes:
+      # Mount host /mnt for data access
+      - /mnt:/mnt
+      # Mount host HuggingFace cache
+      - ${HOME}/.cache/huggingface:/home/ubuntu/.cache/huggingface
+      - ${HOME}/tests:/home/ubuntu/tests
+      # # Mount TRTLLM data volume:
+      - ${HOME}/scratch.trt_llm_data_ci/:/home/ubuntu/scratch.trt_llm_data_ci/
+#      - ${HOME}/.gitconfig:/home/ubuntu/.gitconfig
