@@ -315,6 +315,17 @@ class MetricsCollector:
             - KV cache utilization is only calculated and logged when both "usedNumBlocks" and
               "maxNumBlocks" are present in kvCacheStats and "maxNumBlocks" is non-zero.
         """
+        if "cpuMemUsage" in iteration_stats:
+            self.cpu_mem_usage.set(iteration_stats["cpuMemUsage"])
+        if "gpuMemUsage" in iteration_stats:
+            self.gpu_mem_usage.set(iteration_stats["gpuMemUsage"])
+        if "iter" in iteration_stats:
+            self.num_iterations_total.set(iteration_stats["iter"])
+        if "numActiveRequests" in iteration_stats:
+            self.num_active_requests.set(iteration_stats["numActiveRequests"])
+        if "numQueuedRequests" in iteration_stats:
+            self.num_queued_requests.set(iteration_stats["numQueuedRequests"])
+
         if kv_stats := iteration_stats.get("kvCacheStats"):
             cache_hit_rate = kv_stats.get("cacheHitRate")
             if cache_hit_rate is not None:
@@ -324,3 +335,22 @@ class MetricsCollector:
                 if max_num_blocks:
                     utilization = kv_stats["usedNumBlocks"] / max_num_blocks
                     self._log_gauge(self.kv_cache_utilization, utilization)
+
+            if "freeNumBlocks" in kv_stats and "maxNumBlocks" in kv_stats:
+                max_num_blocks = kv_stats["maxNumBlocks"]
+                if max_num_blocks:
+                    self.gpu_cache_usage_perc.set(
+                        (max_num_blocks - kv_stats["freeNumBlocks"]) /
+                        max_num_blocks)
+            for key, gauge_attr in [
+                ("maxNumBlocks", "gpu_cache_blocks_max"),
+                ("freeNumBlocks", "gpu_cache_blocks_free"),
+                ("usedNumBlocks", "gpu_cache_blocks_used"),
+                ("reusedBlocks", "gpu_cache_blocks_reused_total"),
+                ("missedBlocks", "gpu_cache_blocks_missed_total"),
+                ("allocNewBlocks", "gpu_cache_blocks_alloc_new_total"),
+                ("allocTotalBlocks", "gpu_cache_blocks_alloc_total"),
+                ("tokensPerBlock", "conf_kv_tokens_per_block"),
+            ]:
+                if key in kv_stats:
+                    getattr(self, gauge_attr).set(kv_stats[key])
