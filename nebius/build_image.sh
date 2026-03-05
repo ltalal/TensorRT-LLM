@@ -3,9 +3,23 @@ set -e
 
 # Parse command line arguments
 PUSH_FLAG=false
-if [[ "$1" == "--push" ]]; then
-    PUSH_FLAG=true
-fi
+LOGIN_FLAG=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --push)
+            PUSH_FLAG=true
+            shift
+            ;;
+        --login)
+            LOGIN_FLAG=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
 
 # Set base image
 image="nvcr.io/nvidia/tensorrt-llm/release"
@@ -31,6 +45,19 @@ if [ "$ver_trt" != "$trtllm_ver" ]; then
 fi
 
 commit_hash=$(git rev-parse --short HEAD)
+
+# Check for uncommitted changes in tensorrt_llm directory
+uncommitted=$(git status --porcelain ../tensorrt_llm/)
+if [ -n "$uncommitted" ]; then
+    echo "Warning: Uncommitted changes in tensorrt_llm directory (will be ignored):"
+    echo "$uncommitted" | sed 's/^/  /'
+    echo "These changes will not be included in the patch."
+    echo
+    read -p "continue (y/n)? " reply
+    if [[ ! "$reply" =~ ^[yY]$ ]]; then
+        exit 1
+    fi
+fi
 
 echo "TensorRT-LLM version: $trtllm_ver"
 echo "Nebius version: $nb_ver"
@@ -73,6 +100,14 @@ if [ ! -f "$IMAGE_LIST_FILE" ]; then
     exit 1
 fi
 
+# Prompt for credentials when --login and --push are both set
+if [ "$PUSH_FLAG" = true ] && [ "$LOGIN_FLAG" = true ]; then
+    read -p "user (iam): " DOCKER_USER
+    DOCKER_USER="${DOCKER_USER:-iam}"
+    read -s -p "password: " DOCKER_PASSWORD
+    echo
+fi
+
 # Read images.txt and tag the resulting image
 while IFS= read -r result_image || [[ -n "$result_image" ]]; do
     # Skip empty lines and comments
@@ -90,6 +125,15 @@ while IFS= read -r result_image || [[ -n "$result_image" ]]; do
     fi
 
     if [ "$PUSH_FLAG" = true ]; then
+        if [ "$LOGIN_FLAG" = true ] && [ -n "$DOCKER_PASSWORD" ]; then
+            registry="${result_image%%/*}"
+            echo "Logging in to registry: $registry"
+            echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USER" --password-stdin "$registry"
+            if [ $? -ne 0 ]; then
+                echo "Error: Failed to login to registry $registry"
+                continue
+            fi
+        fi
         echo "Pushing image: $target_tag"
         docker push "$target_tag"
         if [ $? -ne 0 ]; then
