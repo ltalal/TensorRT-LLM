@@ -4,6 +4,7 @@ set -e
 # Parse command line arguments
 PUSH_FLAG=false
 LOGIN_FLAG=false
+dynamo_version=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --push)
@@ -13,6 +14,14 @@ while [[ $# -gt 0 ]]; do
         --login)
             LOGIN_FLAG=true
             shift
+            ;;
+        --dynamo)
+            dynamo_version="$2"
+            if [ -z "$dynamo_version" ]; then
+                echo "Error: --dynamo requires a version (e.g. --dynamo 0.9.1)"
+                exit 1
+            fi
+            shift 2
             ;;
         *)
             echo "Unknown option: $1"
@@ -61,6 +70,7 @@ fi
 
 echo "TensorRT-LLM version: $trtllm_ver"
 echo "Nebius version: $nb_ver"
+[ -n "$dynamo_version" ] && echo "Dynamo version: $dynamo_version"
 echo "Commit hash: $commit_hash"
 
 # Make patch from current branch to tag "v$trtllm_ver", limited to tensorrt_llm directory
@@ -75,12 +85,18 @@ echo "Applying patch:"
 cat patch.txt
 
 # Build Docker image
-image_tag="$trtllm_ver.$nb_ver.$commit_hash"
+if [ -n "$dynamo_version" ]; then
+    image_tag="$trtllm_ver.$nb_ver.dynamo$dynamo_version.$commit_hash"
+else
+    image_tag="$trtllm_ver.$nb_ver.$commit_hash"
+fi
 built_image="$image:nb.dev"
 
-# Use BASE_IMAGE env var if set, otherwise use default
+# Use BASE_IMAGE env var if set, otherwise use dynamo or default
 if [ -n "$BASE_IMAGE" ]; then
     base_image="$BASE_IMAGE"
+elif [ -n "$dynamo_version" ]; then
+    base_image="nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:$dynamo_version"
 else
     base_image="$image:$trtllm_ver"
 fi

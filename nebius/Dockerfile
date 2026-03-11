@@ -1,7 +1,8 @@
 ARG BASE_IMAGE
 FROM --platform=linux/amd64 ${BASE_IMAGE}
 
-# Install patch tool
+# Install patch tool (Dynamo base image runs as non-root; switch to root for apt-get)
+USER root
 RUN apt-get update && \
     apt-get install -y patch && \
     apt-get clean && \
