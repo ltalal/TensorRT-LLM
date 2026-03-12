@@ -107,3 +107,4 @@ enroot/tensorrt_llm.devel.sqsh
 
 # Nebius
 nebius/patch.txt
+.claude/settings.local.json
