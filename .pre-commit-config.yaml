@@ -1366,8 +1366,8 @@ common-files: &common_files |
         triton_backend/tools/whisper/client.py |
     )$
 
-# Global exclude pattern for vendored third-party code
-exclude: '^triton_kernels/'
+# Global exclude pattern for vendored third-party code and nebius/ folder
+exclude: '^triton_kernels/|^nebius/'
 
 default_install_hook_types: [pre-commit, commit-msg]
 repos:
