@@ -16,7 +16,7 @@ from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
 from typing import (Annotated, Any, AsyncGenerator, AsyncIterator, List,
-                    Optional, Union)
+                    Literal, Optional, Union)
 
 import uvicorn
 from fastapi import Body, FastAPI, Request
@@ -115,7 +115,8 @@ class OpenAIServer:
                  metadata_server_cfg: MetadataServerConfig,
                  disagg_cluster_config: Optional[DisaggClusterConfig] = None,
                  multimodal_server_config: Optional[MultimodalServerConfig] = None,
-                 chat_template: Optional[str] = None):
+                 chat_template: Optional[str] = None,
+                 check_stuck_requests: Literal["false", "true", "warn"] = "warn"):
         self.generator = generator
         self._is_visual_gen = isinstance(generator, VisualGen)
         self.tool_parser = tool_parser
@@ -145,6 +146,7 @@ class OpenAIServer:
         self.stuck_requests_tracker = {}
         # Time threshold for considering a request as stuck (in seconds)
         self.stuck_requests_threshold = 60  # 1 minute
+        self.check_stuck_requests = check_stuck_requests
 
         # as disagg-worker
         self.disagg_cluster_storage = None
@@ -276,8 +278,10 @@ class OpenAIServer:
         if self.generator.args.return_perf_metrics:
             set_prometheus_multiproc_dir()
             self.metrics_collector = MetricsCollector({
-                "model_name": self.model,
-                "engine_type": "tensorrt_llm",
+                "model_name":
+                self.model,
+                "engine_type":
+                "tensorrt_llm",
             })
             max_perf_metrics = self.generator.args.perf_metrics_max_requests
             if max_perf_metrics > 0:
@@ -519,9 +523,15 @@ class OpenAIServer:
 
     async def health(self) -> Response:
         if self._check_health():
-            # Check for stuck requests
-            if self._check_stuck_requests():
-                return Response(status_code=500, content="Stuck requests detected")
+            # Check for stuck requests (when enabled)
+            if self.check_stuck_requests == "true":
+                if self._check_stuck_requests():
+                    return Response(status_code=500,
+                                    content="Stuck requests detected")
+            elif self.check_stuck_requests == "warn":
+                if self._check_stuck_requests():
+                    logger.warning(
+                        "Stuck requests detected during health check")
             return Response(status_code=200)
         else:
             return Response(status_code=503, content="LLM is unavailable. Please check the server logs for more details.")
@@ -551,7 +561,17 @@ class OpenAIServer:
 
             # Check if the response indicates success (status code 200)
             if response.status_code == 200:
-                return Response(status_code=200, content="Generation health check OK")
+                # Check for stuck requests (when enabled)
+                if self.check_stuck_requests == "true":
+                    if self._check_stuck_requests():
+                        return Response(status_code=500,
+                                        content="Stuck requests detected")
+                elif self.check_stuck_requests == "warn":
+                    if self._check_stuck_requests():
+                        logger.warning(
+                            "Stuck requests detected during health_generate")
+                return Response(status_code=200,
+                                content="Generation health check OK")
             else:
                 logger.error(f"Health generate check failed with status code: {response.status_code}")
                 try:
