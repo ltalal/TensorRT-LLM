@@ -162,6 +162,26 @@ def test_openai_compatible_json_schema(client: openai.OpenAI, model_name: str):
     assert message.role == "assistant"
     jsonschema.validate(json.loads(message.content), json_schema)
 
+    # OpenAI Structured Outputs wrap the JSON Schema under a "schema" key.
+    chat_completion_wrapped = client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        max_completion_tokens=256,
+        response_format={
+            "type": "json_schema",
+            "json_schema": {
+                "name": "capital_info",
+                "strict": True,
+                "schema": json_schema,
+            },
+        },
+        temperature=0.0,
+    )
+    message_wrapped = chat_completion_wrapped.choices[0].message
+    assert message_wrapped.content is not None
+    assert message_wrapped.role == "assistant"
+    jsonschema.validate(json.loads(message_wrapped.content), json_schema)
+
 
 def test_json_schema_user_profile(client: openai.OpenAI, model_name: str):
     json_schema = {
