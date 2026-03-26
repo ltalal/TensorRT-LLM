@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-# SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Download minimal models required to run OpenAI server unit tests.
-# Run from repo root: python nebius/download_minimal_models.py
+# Run from repo root: python nebius/devtools/download_minimal_models.py
 #
 # Usage:
-#   python nebius/download_minimal_models.py [--output-dir DIR]
+#   python nebius/devtools/download_minimal_models.py [--output-dir DIR]
 #
 # After running, set LLM_MODELS_ROOT and run tests:
 #   export LLM_MODELS_ROOT=/path/to/output/dir
@@ -20,13 +20,16 @@ from pathlib import Path
 # Models needed for unittest/llmapi/apps/ -k openai tests
 # Path under LLM_MODELS_ROOT : HuggingFace repo ID
 #
-# Guided decoding (_test_openai_chat_guided_decoding.py) needs:
-#   - meta-llama/Llama-3.1-8B-Instruct (below) - run with -k "meta-llama"
-#   - openai/gpt-oss-120b: gpt_oss/gpt-oss-120b + gpt_oss/gpt-oss-120b-Eagle3
-#     (not on public HF; skip with -k "meta-llama" for minimal setup)
+# GPT-OSS (HuggingFace): see docs/source/blogs/tech_blog/blog11_GPT_OSS_Eagle3.md
+#   - gpt_oss/gpt-oss-20b: _test_openai_responses.py, _test_openai_chat_harmony.py, etc.
+#   - gpt_oss/gpt-oss-120b + gpt_oss/gpt-oss-120b-Eagle3: _test_openai_chat_guided_decoding.py
+#     when running the openai/gpt-oss-120b parametrization (large weights; needs HF auth if gated).
 MINIMAL_MODELS = {
     "llama-models-v2/TinyLlama-1.1B-Chat-v1.0": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
     "llama-3.1-model/Llama-3.1-8B-Instruct": "meta-llama/Llama-3.1-8B-Instruct",
+    "gpt_oss/gpt-oss-20b": "openai/gpt-oss-20b",
+    "gpt_oss/gpt-oss-120b": "openai/gpt-oss-120b",
+    "gpt_oss/gpt-oss-120b-Eagle3": "nvidia/gpt-oss-120b-Eagle3",
 }
 
 
@@ -97,9 +100,14 @@ def print_usage(output_dir: Path):
     print(f"  export LLM_MODELS_ROOT={output_dir}")
     print("  cd tests && pytest unittest/llmapi/apps/ -k openai -v")
     print()
-    print("For guided decoding tests only (Llama-3.1-8B):")
+    print("Guided decoding without GPT-OSS 120B (Llama-3.1-8B only):")
     print(
         "  cd tests && pytest unittest/llmapi/apps/_test_openai_chat_guided_decoding.py -k meta-llama -v"
+    )
+    print()
+    print("Full guided decoding module (Llama + GPT-OSS 120B + Eagle3):")
+    print(
+        "  cd tests && pytest unittest/llmapi/apps/_test_openai_chat_guided_decoding.py -v"
     )
     print()
     print("Or add to your shell profile / .env:")
