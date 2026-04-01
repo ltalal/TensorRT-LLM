@@ -93,7 +93,8 @@ def _select_prebuilt_image(env: Dict[str, str]) -> Optional[str]:
     )
     for git_tag in proc.stdout.decode("utf-8").splitlines():
         git_tag = git_tag.strip()
-        candidate_images.append(f"nvcr.io/nvidia/tensorrt-llm/devel:{git_tag}")
+        candidate_images.append(
+            f"nvcr.io/nvidia/tensorrt-llm/release:{git_tag}")
 
     # Check image availability
     for candidate_image in candidate_images:
