@@ -11,6 +11,7 @@ from .glm4_parser import Glm4ToolParser
 from .glm47_parser import Glm47ToolParser
 from .kimi_k2_tool_parser import KimiK2ToolParser
 from .minimax_m2_parser import MiniMaxM2ToolParser
+from .multiline_tool_parser import MultilineToolParser
 from .qwen3_coder_parser import Qwen3CoderToolParser
 from .qwen3_tool_parser import Qwen3ToolParser
 
@@ -58,6 +59,7 @@ class ToolParserFactory:
         "glm47": Glm47ToolParser,
         "minimax_m2": MiniMaxM2ToolParser,
         "gemma4": Gemma4ToolParser,
+        "multiline": MultilineToolParser,
     }
 
     @staticmethod

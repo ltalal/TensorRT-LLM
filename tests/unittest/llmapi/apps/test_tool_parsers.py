@@ -32,6 +32,8 @@ from tensorrt_llm.serve.tool_parser.glm4_parser import Glm4ToolParser
 from tensorrt_llm.serve.tool_parser.glm47_parser import Glm47ToolParser
 from tensorrt_llm.serve.tool_parser.kimi_k2_tool_parser import KimiK2ToolParser
 from tensorrt_llm.serve.tool_parser.minimax_m2_parser import MiniMaxM2ToolParser
+from tensorrt_llm.serve.tool_parser.multiline_tool_parser import \
+    MultilineToolParser
 from tensorrt_llm.serve.tool_parser.qwen3_coder_parser import \
     Qwen3CoderToolParser
 from tensorrt_llm.serve.tool_parser.qwen3_tool_parser import Qwen3ToolParser
@@ -2602,6 +2604,274 @@ class TestMiniMaxM2ToolParser:
 
 
 # ============================================================================
+# MultilineToolParser Tests
+# ============================================================================
+
+
+class TestMultilineToolParser:
+    """Test suite for MultilineToolParser class."""
+
+    @pytest.fixture
+    def parser(self):
+        return MultilineToolParser()
+
+    @pytest.fixture
+    def multiline_tools(self):
+        return [
+            ChatCompletionToolsParam(
+                type="function",
+                function=FunctionDefinition(
+                    name="Glob",
+                    description="Find files matching a glob pattern",
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "target_directory": {
+                                "type": "string"
+                            },
+                            "glob_pattern": {
+                                "type": "string"
+                            },
+                        },
+                    },
+                ),
+            ),
+            ChatCompletionToolsParam(
+                type="function",
+                function=FunctionDefinition(
+                    name="Write",
+                    description="Write a file",
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string"
+                            },
+                            "contents": {
+                                "type": "string"
+                            },
+                        },
+                    },
+                ),
+            ),
+        ]
+
+    def test_initialization(self, parser):
+        """Test that MultilineToolParser initializes with expected markers."""
+        assert parser.calls_begin == "<｜tool▁calls▁begin｜>"
+        assert parser.calls_end == "<｜tool▁calls▁end｜>"
+        assert parser.bot_token == "<｜tool▁call▁begin｜>"
+        assert parser.eot_token == "<｜tool▁call▁end｜>"
+        assert parser.tool_separator == "<｜tool▁sep｜>"
+
+    def test_has_tool_call_true(self, parser):
+        """Test has_tool_call returns True when marker is present."""
+        assert parser.has_tool_call("<｜tool▁calls▁begin｜>") is True
+        assert parser.has_tool_call("<｜tool▁call▁begin｜>") is True
+
+    def test_has_tool_call_false(self, parser):
+        """Test has_tool_call returns False for regular text."""
+        assert parser.has_tool_call("This is just assistant text.") is False
+
+    def test_detect_and_parse_glob_tool(self, parser, multiline_tools):
+        """Test parsing a Glob call with multiple string arguments."""
+        text = ("<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>\n"
+                "Glob\n"
+                "<｜tool▁sep｜> target_directory\n"
+                ".\n"
+                "<｜tool▁sep｜> glob_pattern\n"
+                "**/*\n"
+                "<｜tool▁call▁end｜><｜tool▁calls▁end｜>")
+
+        result = parser.detect_and_parse(text, multiline_tools)
+
+        assert result.normal_text == ""
+        assert len(result.calls) == 1
+        assert result.calls[0].tool_index == 0
+        assert result.calls[0].name == "Glob"
+        assert json.loads(result.calls[0].parameters) == {
+            "target_directory": ".",
+            "glob_pattern": "**/*",
+        }
+
+    def test_detect_and_parse_write_tool_multiline_contents(
+            self, parser, multiline_tools):
+        """Test parsing a Write call with multiline contents."""
+        contents = "def main():\n    return 42\n\nprint(main())"
+        text = ("<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>\n"
+                "Write\n"
+                "<｜tool▁sep｜>path\n"
+                "/tmp/sudoku_generator.py\n"
+                "<｜tool▁sep｜>contents\n"
+                f"{contents}\n"
+                "<｜tool▁call▁end｜><｜tool▁calls▁end｜>")
+
+        result = parser.detect_and_parse(text, multiline_tools)
+
+        assert len(result.calls) == 1
+        assert result.calls[0].name == "Write"
+        assert json.loads(result.calls[0].parameters) == {
+            "path": "/tmp/sudoku_generator.py",
+            "contents": contents,
+        }
+
+    def test_detect_and_parse_multiple_tools(self, parser, multiline_tools):
+        """Test parsing multiple calls in one tool call envelope."""
+        text = ("<｜tool▁calls▁begin｜>"
+                "<｜tool▁call▁begin｜>\n"
+                "Glob\n"
+                "<｜tool▁sep｜>target_directory\n"
+                ".\n"
+                "<｜tool▁sep｜>glob_pattern\n"
+                "*.py\n"
+                "<｜tool▁call▁end｜>"
+                "<｜tool▁call▁begin｜>\n"
+                "Write\n"
+                "<｜tool▁sep｜>path\n"
+                "/tmp/out.py\n"
+                "<｜tool▁sep｜>contents\n"
+                "print('ok')\n"
+                "<｜tool▁call▁end｜>"
+                "<｜tool▁calls▁end｜>")
+
+        result = parser.detect_and_parse(text, multiline_tools)
+
+        assert len(result.calls) == 2
+        assert result.calls[0].tool_index == 0
+        assert result.calls[0].name == "Glob"
+        assert result.calls[1].tool_index == 1
+        assert result.calls[1].name == "Write"
+        assert json.loads(result.calls[0].parameters) == {
+            "target_directory": ".",
+            "glob_pattern": "*.py",
+        }
+        assert json.loads(result.calls[1].parameters) == {
+            "path": "/tmp/out.py",
+            "contents": "print('ok')",
+        }
+
+    def test_detect_and_parse_preserves_prefix_and_suffix(
+            self, parser, multiline_tools):
+        """Test text outside tool envelopes is preserved."""
+        text = ("Before "
+                "<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>\n"
+                "Glob\n"
+                "<｜tool▁sep｜>target_directory\n"
+                ".\n"
+                "<｜tool▁sep｜>glob_pattern\n"
+                "*.py\n"
+                "<｜tool▁call▁end｜><｜tool▁calls▁end｜>"
+                " after.")
+
+        result = parser.detect_and_parse(text, multiline_tools)
+
+        assert result.normal_text == "Before after."
+        assert len(result.calls) == 1
+        assert result.calls[0].name == "Glob"
+
+    def test_detect_and_parse_handles_marker_spaces_from_response(
+            self, parser, multiline_tools):
+        """Test non-streaming parsing with spaces around marker tokens."""
+        text = (
+            "The user is asking me to list the contents of the root directory. "
+            "I should use the list_dir tool to do that. </think> \n\n\n "
+            "<｜tool▁calls▁begin｜> <｜tool▁call▁begin｜> \n"
+            "Glob\n"
+            " <｜tool▁sep｜> target_directory\n"
+            ".\n"
+            " <｜tool▁sep｜> glob_pattern\n"
+            "*\n"
+            " <｜tool▁call▁end｜> <｜tool▁calls▁end｜>")
+
+        result = parser.detect_and_parse(text, multiline_tools)
+
+        assert result.normal_text == (
+            "The user is asking me to list the contents of the root directory. "
+            "I should use the list_dir tool to do that. </think>")
+        assert len(result.calls) == 1
+        assert result.calls[0].name == "Glob"
+        assert json.loads(result.calls[0].parameters) == {
+            "target_directory": ".",
+            "glob_pattern": "*",
+        }
+
+    def test_detect_and_parse_no_tool_call(self, parser, multiline_tools):
+        """Test no tool call leaves text unchanged."""
+        text = "Plain assistant response."
+
+        result = parser.detect_and_parse(text, multiline_tools)
+
+        assert result.normal_text == text
+        assert result.calls == []
+
+    def test_parse_streaming_increment_complete_tool(self, multiline_tools):
+        """Test streaming emits name and arguments for a complete call."""
+        parser = MultilineToolParser()
+        text = ("<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>\n"
+                "Glob\n"
+                "<｜tool▁sep｜>target_directory\n"
+                ".\n"
+                "<｜tool▁sep｜>glob_pattern\n"
+                "**/*\n"
+                "<｜tool▁call▁end｜><｜tool▁calls▁end｜>")
+
+        result = parser.parse_streaming_increment(text, multiline_tools)
+
+        assert result.normal_text == ""
+        assert len(result.calls) == 2
+        assert result.calls[0].name == "Glob"
+        assert result.calls[0].parameters == ""
+        assert result.calls[1].name is None
+        assert json.loads(result.calls[1].parameters) == {
+            "target_directory": ".",
+            "glob_pattern": "**/*",
+        }
+
+    def test_parse_streaming_increment_buffers_split_tool_with_marker_spaces(
+            self, multiline_tools):
+        """Test split streaming chunks with spaces around marker tokens."""
+        parser = MultilineToolParser()
+
+        first = parser.parse_streaming_increment(
+            ". </think> \n\n\n <｜tool▁calls▁begin｜> <｜tool▁call▁begin｜> \n"
+            "Glob\n"
+            " <｜tool▁sep｜> target",
+            multiline_tools,
+        )
+        second = parser.parse_streaming_increment(
+            "_directory\n"
+            ".\n"
+            " <｜tool▁sep｜> glob_pattern\n"
+            "*\n"
+            " <｜tool▁call▁end｜> <｜tool▁calls▁end｜>",
+            multiline_tools,
+        )
+
+        assert first.normal_text == ". </think>"
+        assert first.calls == []
+        assert second.normal_text == ""
+        assert len(second.calls) == 2
+        assert second.calls[0].name == "Glob"
+        assert json.loads(second.calls[1].parameters) == {
+            "target_directory": ".",
+            "glob_pattern": "*",
+        }
+
+    def test_parse_streaming_increment_buffers_partial_token(
+            self, parser, multiline_tools):
+        """Test partial tool markers are buffered."""
+        result = parser.parse_streaming_increment("<｜tool▁calls",
+                                                  multiline_tools)
+
+        assert result.normal_text == ""
+        assert result.calls == []
+
+    def test_supports_structural_tag(self, parser):
+        """Test that supports_structural_tag returns False."""
+        assert parser.supports_structural_tag() is False
+
+
+# ============================================================================
 # Reasoning Parser Tests for Interleaved Thinking
 # ============================================================================
 
@@ -2691,6 +2961,19 @@ class TestToolParserFactory:
             ToolParserFactory
         parser = ToolParserFactory.create_tool_parser("minimax_m2")
         assert isinstance(parser, MiniMaxM2ToolParser)
+
+    def test_multiline_registered(self):
+        """Test that multiline parser is registered in factory."""
+        from tensorrt_llm.serve.tool_parser.tool_parser_factory import \
+            ToolParserFactory
+        assert "multiline" in ToolParserFactory.parsers
+
+    def test_create_multiline_parser(self):
+        """Test creating multiline parser via factory."""
+        from tensorrt_llm.serve.tool_parser.tool_parser_factory import \
+            ToolParserFactory
+        parser = ToolParserFactory.create_tool_parser("multiline")
+        assert isinstance(parser, MultilineToolParser)
 
 
 # ============================================================================
