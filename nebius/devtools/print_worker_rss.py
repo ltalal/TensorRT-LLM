@@ -45,7 +45,11 @@ def _read_rss_kib(proc_dir: Path) -> int:
 def _read_rank_env(proc_dir: Path) -> tuple[str, str]:
     rank = "?"
     local_rank = "?"
-    for entry in proc_dir.joinpath("environ").read_bytes().split(b"\0"):
+    try:
+        environ = proc_dir.joinpath("environ").read_bytes()
+    except PermissionError:
+        return rank, local_rank
+    for entry in environ.split(b"\0"):
         if b"=" not in entry:
             continue
         key, value = entry.split(b"=", 1)
@@ -108,13 +112,30 @@ def parse_arguments() -> argparse.Namespace:
         default=True,
         help="Include direct child process RSS in per-worker totals, such as Torch Inductor compile workers.",
     )
+    parser.add_argument(
+        "pids",
+        nargs="*",
+        type=int,
+        metavar="PID",
+        help="Specific PIDs to inspect. If omitted, auto-detects MPI worker processes.",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_arguments()
     processes = _iter_processes()
-    workers = [process for process in processes if WORKER_CMDLINE_TOKEN in process.cmdline]
+    pid_map = {p.pid: p for p in processes}
+
+    if args.pids:
+        workers = []
+        for pid in args.pids:
+            if pid in pid_map:
+                workers.append(pid_map[pid])
+            else:
+                print(f"PID {pid} not found or not accessible.")
+    else:
+        workers = [process for process in processes if WORKER_CMDLINE_TOKEN in process.cmdline]
     child_rss_by_ppid: dict[int, int] = {}
 
     if args.include_children:
@@ -123,7 +144,7 @@ def main() -> int:
                 child_rss_by_ppid[process.ppid] = child_rss_by_ppid.get(process.ppid, 0) + process.rss_kib
 
     if not workers:
-        print("No running TensorRT-LLM MPI worker processes found.")
+        print("No processes found." if args.pids else "No running TensorRT-LLM MPI worker processes found.")
         return 1
 
     print(

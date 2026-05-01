@@ -32,6 +32,7 @@ pip install torch==2.9.1 torchvision --index-url https://download.pytorch.org/wh
 ### 3. Install with Precompiled Binaries
 
 ```bash
+sudo python3 -m pip uninstall -y tensorrt_llm # optionally: uninstall previously installed package
 TRTLLM_USE_PRECOMPILED=1 pip install -e .
 ```
 
