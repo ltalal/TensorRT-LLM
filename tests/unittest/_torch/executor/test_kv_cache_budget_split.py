@@ -23,13 +23,14 @@ from unittest.mock import Mock
 import pytest
 
 from tensorrt_llm._torch.pyexecutor._util import KvCacheCreator
+from tensorrt_llm._torch.pyexecutor.resource_manager import ResourceManagerType
 from tensorrt_llm.llmapi.llm_args import KvCacheConfig
 
 GB = 1 << 30
 
 
 def _make_creator(
-    max_gpu_total_bytes: int,
+    max_gpu_total_bytes: int = 10 * GB,
     host_cache_size=None,
     total_kv_per_token: int = 100,
     target_kv_per_token: int = 80,
@@ -51,6 +52,12 @@ def _make_creator(
     c._get_kv_size_per_token = Mock(return_value=total_kv_per_token)
 
     return c
+
+
+class _DummyKVCacheManager:
+    @staticmethod
+    def get_cache_size_per_token(*args, **kwargs):
+        return 80
 
 
 class TestSplitKvCacheBudgetForDraft:
@@ -103,6 +110,42 @@ class TestSplitKvCacheBudgetForDraft:
         draft_host = draft_config.host_cache_size
         assert target_host + draft_host == total_host
 
+    def test_host_budget_split_without_gpu_split(self):
+        """V1 non-VSWA uses max_tokens for GPU but must still split host."""
+        total_gpu = 10 * GB
+        total_host = 20 * GB
+        c = _make_creator(
+            max_gpu_total_bytes=total_gpu,
+            host_cache_size=total_host,
+            total_kv_per_token=100,
+            target_kv_per_token=80,
+        )
+
+        draft_config = c._split_kv_cache_budget_for_draft(split_gpu_budget=False)
+
+        assert draft_config is not None
+        assert c._kv_cache_config.max_gpu_total_bytes == total_gpu
+        assert draft_config.max_gpu_total_bytes == total_gpu
+        assert c._kv_cache_config.host_cache_size == 16 * GB
+        assert draft_config.host_cache_size == 4 * GB
+
+    def test_host_budget_split_when_gpu_budget_missing(self):
+        total_host = 20 * GB
+        c = _make_creator(
+            max_gpu_total_bytes=0,
+            host_cache_size=total_host,
+            total_kv_per_token=100,
+            target_kv_per_token=80,
+        )
+
+        draft_config = c._split_kv_cache_budget_for_draft()
+
+        assert draft_config is not None
+        assert c._kv_cache_config.max_gpu_total_bytes == 0
+        assert draft_config.max_gpu_total_bytes == 0
+        assert c._kv_cache_config.host_cache_size == 16 * GB
+        assert draft_config.host_cache_size == 4 * GB
+
     def test_budgets_sum_to_original(self):
         total_gpu = 15 * GB
         total_host = 30 * GB
@@ -148,7 +191,7 @@ class TestSplitKvCacheBudgetForDraft:
         # host_cache_size=0 should not be split (guard: host_budget > 0)
         assert draft_config.host_cache_size == 0
 
-    def test_returns_none_when_no_gpu_budget(self):
+    def test_returns_none_when_no_budget(self):
         c = _make_creator(max_gpu_total_bytes=0)
 
         assert c._split_kv_cache_budget_for_draft() is None
@@ -180,3 +223,47 @@ class TestSplitKvCacheBudgetForDraft:
             c._kv_cache_config.max_gpu_total_bytes + draft_config.max_gpu_total_bytes
         ) == total_gpu
         assert (c._kv_cache_config.host_cache_size + draft_config.host_cache_size) == total_host
+
+    def test_estimation_splits_host_budget_then_restores_config(self):
+        """Estimation should not allocate the full host budget for the draft."""
+        total_gpu = 10 * GB
+        total_host = 64 * GB
+        c = _make_creator(
+            max_gpu_total_bytes=total_gpu,
+            host_cache_size=total_host,
+            total_kv_per_token=100,
+            target_kv_per_token=80,
+        )
+        c._kv_cache_manager_cls = _DummyKVCacheManager
+        c._skip_est = False
+        c._draft_model_engine = None
+        c._kv_connector_manager = None
+        c._should_create_separate_draft_kv_cache = Mock(return_value=True)
+
+        target_host_sizes = []
+        draft_host_sizes = []
+        c._create_kv_cache_manager = Mock(
+            side_effect=lambda *args, **kwargs: target_host_sizes.append(
+                c._kv_cache_config.host_cache_size
+            )
+            or Mock()
+        )
+        c._create_one_model_draft_kv_cache_manager = Mock(
+            side_effect=lambda estimating_kv_cache,
+            kv_cache_config_override: draft_host_sizes.append(
+                kv_cache_config_override.host_cache_size
+            )
+            or Mock()
+        )
+
+        resources = {}
+        c.build_managers(resources, estimating_kv_cache=True)
+
+        expected_draft_host = int(total_host * 0.2)
+        expected_target_host = total_host - expected_draft_host
+        assert target_host_sizes == [expected_target_host]
+        assert draft_host_sizes == [expected_draft_host]
+        assert c._kv_cache_config.max_gpu_total_bytes == total_gpu
+        assert c._kv_cache_config.host_cache_size == total_host
+        assert resources[ResourceManagerType.KV_CACHE_MANAGER] is not None
+        assert resources[ResourceManagerType.DRAFT_KV_CACHE_MANAGER] is not None

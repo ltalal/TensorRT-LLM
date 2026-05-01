@@ -728,19 +728,25 @@ class KvCacheCreator:
             is_disagg=self._is_disagg,
         )
 
-    def _split_kv_cache_budget_for_draft(self) -> Optional[KvCacheConfig]:
+    def _split_kv_cache_budget_for_draft(self,
+                                         *,
+                                         split_gpu_budget: bool = True
+                                         ) -> Optional[KvCacheConfig]:
         """Split KV cache budgets between target and draft KV caches.
 
-        When using KVCacheManagerV2 with a separate draft KV cache,
-        max_gpu_total_bytes and host_cache_size each represent the total
-        budget for both target and draft combined.  This method splits both
-        budgets proportionally based on their per-token KV cache sizes.
+        When using a separate draft KV cache, max_gpu_total_bytes and
+        host_cache_size each represent the total budget for both target and
+        draft combined.  This method splits the selected budgets
+        proportionally based on their per-token KV cache sizes.
 
         Returns a cloned KvCacheConfig for the draft, or None if no split is
         needed.  Also modifies self._kv_cache_config in-place for the target.
         """
         total_budget = self._kv_cache_config.max_gpu_total_bytes
-        if total_budget is None or total_budget <= 0:
+        host_budget = self._kv_cache_config.host_cache_size
+        has_gpu_budget = total_budget is not None and total_budget > 0
+        has_host_budget = host_budget is not None and host_budget > 0
+        if (not split_gpu_budget or not has_gpu_budget) and not has_host_budget:
             return None
 
         total_kv = self._get_kv_size_per_token()
@@ -754,21 +760,21 @@ class KvCacheCreator:
 
         draft_ratio = draft_kv / total_kv
 
-        draft_budget = int(total_budget * draft_ratio)
-        target_budget = total_budget - draft_budget
-
-        logger.info(
-            f"Splitting KV cache budget: total={total_budget / GB:.2f} GiB, "
-            f"target={target_budget / GB:.2f} GiB ({target_kv}B/tok), "
-            f"draft={draft_budget / GB:.2f} GiB ({draft_kv}B/tok)")
-
-        self._kv_cache_config.max_gpu_total_bytes = target_budget
-
         draft_kv_cache_config = self._kv_cache_config.model_copy()
-        draft_kv_cache_config.max_gpu_total_bytes = draft_budget
 
-        host_budget = self._kv_cache_config.host_cache_size
-        if host_budget is not None and host_budget > 0:
+        if split_gpu_budget and has_gpu_budget:
+            draft_budget = int(total_budget * draft_ratio)
+            target_budget = total_budget - draft_budget
+
+            logger.info(
+                f"Splitting KV cache budget: total={total_budget / GB:.2f} GiB, "
+                f"target={target_budget / GB:.2f} GiB ({target_kv}B/tok), "
+                f"draft={draft_budget / GB:.2f} GiB ({draft_kv}B/tok)")
+
+            self._kv_cache_config.max_gpu_total_bytes = target_budget
+            draft_kv_cache_config.max_gpu_total_bytes = draft_budget
+
+        if has_host_budget:
             draft_host_budget = int(host_budget * draft_ratio)
             target_host_budget = host_budget - draft_host_budget
             self._kv_cache_config.host_cache_size = target_host_budget
@@ -787,12 +793,9 @@ class KvCacheCreator:
         if self._skip_est:
             self.configure_kv_cache_capacity()
 
-        # For V2 with separate one-model draft KV cache, split the total budget
-        # between target and draft before creating either manager.
-        # Only split for the final managers, not during estimation — estimation
-        # uses max_tokens-based logic and must not have its config mutated.
-        # Two-model draft is excluded: V2 does not support two-model mode.
         draft_kv_cache_config = None
+        saved_budget = None
+        saved_host_cache_size = None
         if (not estimating_kv_cache
                 and self._should_create_separate_draft_kv_cache()
                 and issubclass(self._kv_cache_manager_cls, KVCacheManagerV2)):
@@ -801,16 +804,29 @@ class KvCacheCreator:
         # Also split for V1 VSWA. The VSWA pool is sized directly from
         # max_gpu_total_bytes and ignores max_tokens, so without splitting
         # both target and draft each allocate the full combined budget.
-        # V1 non-VSWA does not need this: max_tokens caps the block count
-        # per model, giving each a proportional share of the budget.
+        # V1 non-VSWA does not need GPU splitting: max_tokens caps the block
+        # count per model, giving each a proportional GPU share.  Host cache
+        # capacity is sized directly from host_cache_size, so it still needs a
+        # host-only split to avoid allocating the full host budget twice.
         has_draft = (
             self._draft_model_engine is not None  # two-model
             or self._should_create_separate_draft_kv_cache())  # one-model
         if (not estimating_kv_cache and has_draft
-                and draft_kv_cache_config is None
-                and not issubclass(self._kv_cache_manager_cls, KVCacheManagerV2)
-                and is_vswa_enabled(self._kv_cache_config)):
-            draft_kv_cache_config = self._split_kv_cache_budget_for_draft()
+                and draft_kv_cache_config is None and
+                not issubclass(self._kv_cache_manager_cls, KVCacheManagerV2)):
+            draft_kv_cache_config = self._split_kv_cache_budget_for_draft(
+                split_gpu_budget=is_vswa_enabled(self._kv_cache_config))
+
+        # During estimation, split only host cache.  The GPU capacity dry run
+        # depends on max_tokens-based sizing, but host blocks are sized directly
+        # from host_cache_size and otherwise the draft manager can allocate the
+        # full host budget again using its much smaller bytes/token.
+        if (estimating_kv_cache and has_draft and
+                not issubclass(self._kv_cache_manager_cls, KVCacheManagerV2)):
+            saved_budget = self._kv_cache_config.max_gpu_total_bytes
+            saved_host_cache_size = self._kv_cache_config.host_cache_size
+            draft_kv_cache_config = self._split_kv_cache_budget_for_draft(
+                split_gpu_budget=False)
 
         kv_cache_manager = self._create_kv_cache_manager(
             self._model_engine, estimating_kv_cache)
@@ -827,19 +843,26 @@ class KvCacheCreator:
                 assert draft_kv_cache_config is None, (
                     "KVCacheManagerV2 does not support two-model speculative "
                     "decoding with separate draft KV cache budget splitting.")
-            # For V1 VSWA, apply the draft's split budget temporarily
+            # Apply the draft's split budget temporarily.
             if draft_kv_cache_config is not None:
-                saved_budget = self._kv_cache_config.max_gpu_total_bytes
+                draft_saved_budget = self._kv_cache_config.max_gpu_total_bytes
+                draft_saved_host_cache_size = self._kv_cache_config.host_cache_size
                 self._kv_cache_config.max_gpu_total_bytes = draft_kv_cache_config.max_gpu_total_bytes
+                self._kv_cache_config.host_cache_size = draft_kv_cache_config.host_cache_size
             draft_kv_cache_manager = self._create_kv_cache_manager(
                 self._draft_model_engine, estimating_kv_cache)
             if draft_kv_cache_config is not None:
-                self._kv_cache_config.max_gpu_total_bytes = saved_budget
+                self._kv_cache_config.max_gpu_total_bytes = draft_saved_budget
+                self._kv_cache_config.host_cache_size = draft_saved_host_cache_size
         # One-model speculative decoding with different KV layouts
         elif self._should_create_separate_draft_kv_cache():
             draft_kv_cache_manager = self._create_one_model_draft_kv_cache_manager(
                 estimating_kv_cache,
                 kv_cache_config_override=draft_kv_cache_config)
+
+        if estimating_kv_cache and saved_host_cache_size is not None:
+            self._kv_cache_config.max_gpu_total_bytes = saved_budget
+            self._kv_cache_config.host_cache_size = saved_host_cache_size
 
         resources[ResourceManagerType.KV_CACHE_MANAGER] = kv_cache_manager
         resources[
