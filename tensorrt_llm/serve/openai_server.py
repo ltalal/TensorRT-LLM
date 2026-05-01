@@ -91,6 +91,10 @@ from tensorrt_llm.serve.visual_gen_utils import (VIDEO_STORE,
 from tensorrt_llm.version import __version__ as VERSION
 from tensorrt_llm.visual_gen import VisualGen, VisualGenParams
 
+from .._utils import nvtx_mark, set_prometheus_multiproc_dir
+from .harmony_adapter import (HarmonyAdapter, get_harmony_adapter,
+                              maybe_transform_reasoning_effort)
+
 # Define the metrics filename locally to avoid circular import
 PROM_METRICS_FILENAME = '/dev/shm/prom_metrics.json'
 
@@ -101,10 +105,6 @@ prom_metrics = defaultdict(float, {
     "prompt_tokens_total": 0,
     "generation_tokens_total": 0,
 })
-
-from .._utils import nvtx_mark, set_prometheus_multiproc_dir
-from .harmony_adapter import (HarmonyAdapter, get_harmony_adapter,
-                              maybe_transform_reasoning_effort)
 
 # yapf: enable
 TIMEOUT_KEEP_ALIVE = 5  # seconds.
@@ -518,8 +518,7 @@ class OpenAIServer:
         )
 
     def _check_stuck_requests(self) -> bool:
-        """
-        Check for stuck requests with "GENERATION_COMPLETE" stage.
+        """Check for stuck requests with "GENERATION_COMPLETE" stage.
 
         Returns:
             bool: True if stuck requests are found, False otherwise.
@@ -882,7 +881,7 @@ class OpenAIServer:
                 value_list.frombytes(valbuf)
                 for key, value in zip(key_list, value_list):
                     prom_metrics[key] = value
-        except:
+        except Exception:
             print(bufs)
             traceback.print_exc()
         all_requests_done = (prom_metrics["request_completed_total"] +
@@ -899,9 +898,10 @@ class OpenAIServer:
                 0, prom_metrics["request_started_total"] -
                 (prom_metrics["num_requests_running"] + all_requests_done))
         if self.metrics_collector:
-            self.metrics_collector.num_requests_running.set(
+            labels = self.metrics_collector.labels
+            self.metrics_collector.num_requests_running.labels(**labels).set(
                 prom_metrics["num_requests_running"])
-            self.metrics_collector.num_requests_waiting.set(
+            self.metrics_collector.num_requests_waiting.labels(**labels).set(
                 prom_metrics["num_requests_waiting"])
             self.metrics_collector.generation_tokens_total.set(
                 prom_metrics["generation_tokens_total"])
@@ -928,14 +928,13 @@ class OpenAIServer:
 
             self.metrics_collector.cpu_mem_usage.set(stats["cpuMemUsage"])
             self.metrics_collector.gpu_mem_usage.set(stats["gpuMemUsage"])
-            self.metrics_collector.num_iterations_total.set(
-                stats["gpuMemUsage"])
+            if "iter" in stats:
+                self.metrics_collector.num_iterations_total.set(
+                    float(stats["iter"]))
             self.metrics_collector.num_active_requests.set(
                 stats["numActiveRequests"])
             self.metrics_collector.num_queued_requests.set(
                 stats["numQueuedRequests"])
-            self.metrics_collector.num_iterations_total.set(
-                stats["cpuMemUsage"])
 
             if "kvCacheStats" not in stats:
                 return
@@ -1162,8 +1161,7 @@ class OpenAIServer:
         return chat_response
 
     async def _iteration_stats_collector_loop(self):
-        """
-        Background task that continuously collects iteration statistics from the LLM engine.
+        """Background task that continuously collects iteration statistics from the LLM engine.
 
         This task runs in the background for the lifetime of the server and drains iteration
         stats from the engine's stats queue, logging every stat to Prometheus.  Gauges
@@ -1708,8 +1706,8 @@ class OpenAIServer:
 
     async def chat_harmony(self, request: ChatCompletionRequest,
                            raw_request: Request) -> Response:
-        """
-        Chat Completion API with harmony format support.
+        """Chat Completion API with harmony format support.
+
         Supports both streaming and non-streaming modes.
         """
 
