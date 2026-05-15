@@ -173,8 +173,15 @@ def _update_dot_env(env: Dict[str, str]):
             continue
         output_lines.append(f"{env_key}=\"{shlex.quote(env_value)}\"\n")
 
+    print(
+        f"DEBUG:make_env: prepared {len(output_lines)} lines for {DOT_ENV_PATH}",
+        flush=True,
+    )
     with open(DOT_ENV_PATH, "w") as f:
+        print(f"DEBUG:make_env: opened {DOT_ENV_PATH} for write", flush=True)
         f.writelines(output_lines)
+        print(f"DEBUG:make_env: wrote {DOT_ENV_PATH}", flush=True)
+    print(f"DEBUG:make_env: closed {DOT_ENV_PATH}", flush=True)
 
 
 def main():
@@ -211,12 +218,14 @@ def main():
     _ensure_compose_override()
 
     _update_dot_env(env)
+    print("DEBUG:make_env: finished _update_dot_env", flush=True)
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     try:
         main()
+        print("DEBUG:make_env: exiting successfully", flush=True)
     except Exception as e:
         LOGGER.error(f"{e.__class__.__name__}: {e}")
         sys.exit(-1)
