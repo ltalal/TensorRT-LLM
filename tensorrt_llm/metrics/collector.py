@@ -73,6 +73,9 @@ class MetricsCollector:
             trtllm_kv_cache_max_blocks
             trtllm_kv_cache_free_blocks
             trtllm_kv_cache_used_blocks
+            trtllm_kv_cache_host_max_blocks
+            trtllm_kv_cache_host_free_blocks
+            trtllm_kv_cache_host_used_blocks
             trtllm_kv_cache_tokens_per_block
             trtllm_num_context_requests
             trtllm_num_generation_requests
@@ -376,15 +379,27 @@ class MetricsCollector:
         # KV cache block metrics
         self.kv_cache_max_blocks = Gauge(
             name=self.metric_prefix + "kv_cache_max_blocks",
-            documentation="Maximum number of KV cache blocks",
+            documentation="Maximum number of GPU KV cache blocks",
             labelnames=self.labels.keys())
         self.kv_cache_free_blocks = Gauge(
             name=self.metric_prefix + "kv_cache_free_blocks",
-            documentation="Number of free KV cache blocks",
+            documentation="Number of free GPU KV cache blocks",
             labelnames=self.labels.keys())
         self.kv_cache_used_blocks = Gauge(
             name=self.metric_prefix + "kv_cache_used_blocks",
-            documentation="Number of used KV cache blocks",
+            documentation="Number of used GPU KV cache blocks",
+            labelnames=self.labels.keys())
+        self.kv_cache_host_max_blocks = Gauge(
+            name=self.metric_prefix + "kv_cache_host_max_blocks",
+            documentation="Maximum number of CPU KV cache blocks",
+            labelnames=self.labels.keys())
+        self.kv_cache_host_free_blocks = Gauge(
+            name=self.metric_prefix + "kv_cache_host_free_blocks",
+            documentation="Number of free CPU KV cache blocks",
+            labelnames=self.labels.keys())
+        self.kv_cache_host_used_blocks = Gauge(
+            name=self.metric_prefix + "kv_cache_host_used_blocks",
+            documentation="Number of used CPU KV cache blocks",
             labelnames=self.labels.keys())
         self.kv_cache_tokens_per_block = Gauge(
             name=self.metric_prefix + "kv_cache_tokens_per_block",
@@ -515,15 +530,31 @@ class MetricsCollector:
             labelnames=self.labels.keys()).labels(**self.labels)
         self.gpu_cache_usage_perc = Gauge(
             name="gpu_cache_usage_perc",
-            documentation="Percentage of used cache blocks",
+            documentation="Percentage of used GPU cache blocks",
             labelnames=self.labels.keys()).labels(**self.labels)
         self.gpu_cache_blocks_free = Gauge(
             name="gpu_cache_blocks_free",
-            documentation="Number of free blocks in KV cache",
+            documentation="Number of free blocks in GPU KV cache",
             labelnames=self.labels.keys()).labels(**self.labels)
         self.gpu_cache_blocks_used = Gauge(
             name="gpu_cache_blocks_used",
-            documentation="Number of used blocks in KV cache",
+            documentation="Number of used blocks in GPU KV cache",
+            labelnames=self.labels.keys()).labels(**self.labels)
+        self.cpu_cache_usage_perc = Gauge(
+            name="cpu_cache_usage_perc",
+            documentation="Percentage of used CPU KV cache blocks",
+            labelnames=self.labels.keys()).labels(**self.labels)
+        self.cpu_cache_blocks_free = Gauge(
+            name="cpu_cache_blocks_free",
+            documentation="Number of free blocks in CPU KV cache",
+            labelnames=self.labels.keys()).labels(**self.labels)
+        self.cpu_cache_blocks_used = Gauge(
+            name="cpu_cache_blocks_used",
+            documentation="Number of used blocks in CPU KV cache",
+            labelnames=self.labels.keys()).labels(**self.labels)
+        self.cpu_cache_blocks_max = Gauge(
+            name="cpu_cache_blocks_max",
+            documentation="Total number of blocks in CPU KV cache",
             labelnames=self.labels.keys()).labels(**self.labels)
         self.gpu_cache_blocks_reused_total = Gauge(
             name="gpu_cache_blocks_reused_total",
@@ -535,7 +566,7 @@ class MetricsCollector:
             labelnames=self.labels.keys()).labels(**self.labels)
         self.gpu_cache_blocks_max = Gauge(
             name="gpu_cache_blocks_max",
-            documentation="Total number of blocks in KV cache",
+            documentation="Total number of blocks in GPU KV cache",
             labelnames=self.labels.keys()).labels(**self.labels)
         self.gpu_cache_blocks_alloc_total = Gauge(
             name="gpu_cache_blocks_alloc_total",
@@ -704,6 +735,31 @@ class MetricsCollector:
             self._log_gauge(self.max_num_tokens_runtime,
                             iteration_stats["maxNumTokensRuntime"])
 
+        kv_pool_stats = None
+        kv_iter = iteration_stats.get("kvCacheIterationStats")
+        if kv_iter:
+            kv_pool_stats = {
+                "gpu_max": 0,
+                "gpu_free": 0,
+                "gpu_used": 0,
+                "cpu_max": 0,
+                "cpu_free": 0,
+                "cpu_used": 0,
+            }
+            for ws_stats in kv_iter.values():
+                kv_pool_stats["gpu_max"] += ws_stats.get(
+                    "primaryMaxNumBlocks", 0)
+                kv_pool_stats["gpu_free"] += ws_stats.get(
+                    "primaryFreeNumBlocks", 0)
+                kv_pool_stats["gpu_used"] += ws_stats.get(
+                    "primaryUsedNumBlocks", 0)
+                kv_pool_stats["cpu_max"] += ws_stats.get(
+                    "secondaryMaxNumBlocks", 0)
+                kv_pool_stats["cpu_free"] += ws_stats.get(
+                    "secondaryFreeNumBlocks", 0)
+                kv_pool_stats["cpu_used"] += ws_stats.get(
+                    "secondaryUsedNumBlocks", 0)
+
         # KV cache stats
         if kv_stats := iteration_stats.get("kvCacheStats"):
             cache_hit_rate = kv_stats.get("cacheHitRate")
@@ -721,20 +777,37 @@ class MetricsCollector:
                 if delta > 0:
                     self._log_counter(self.kv_cache_missed_blocks, None, delta)
                 self._prev_missed_blocks = missed_blocks
-            if "usedNumBlocks" in kv_stats and "maxNumBlocks" in kv_stats:
-                max_num_blocks = kv_stats["maxNumBlocks"]
+            if kv_pool_stats is not None:
+                max_num_blocks = kv_pool_stats["gpu_max"]
                 if max_num_blocks:
-                    utilization = kv_stats["usedNumBlocks"] / max_num_blocks
+                    utilization = kv_pool_stats["gpu_used"] / max_num_blocks
                     self._log_gauge(self.kv_cache_utilization, utilization)
-            if "maxNumBlocks" in kv_stats:
-                self._log_gauge(self.kv_cache_max_blocks,
-                                kv_stats["maxNumBlocks"])
-            if "freeNumBlocks" in kv_stats:
+                self._log_gauge(self.kv_cache_max_blocks, max_num_blocks)
                 self._log_gauge(self.kv_cache_free_blocks,
-                                kv_stats["freeNumBlocks"])
-            if "usedNumBlocks" in kv_stats:
+                                kv_pool_stats["gpu_free"])
                 self._log_gauge(self.kv_cache_used_blocks,
-                                kv_stats["usedNumBlocks"])
+                                kv_pool_stats["gpu_used"])
+                self._log_gauge(self.kv_cache_host_max_blocks,
+                                kv_pool_stats["cpu_max"])
+                self._log_gauge(self.kv_cache_host_free_blocks,
+                                kv_pool_stats["cpu_free"])
+                self._log_gauge(self.kv_cache_host_used_blocks,
+                                kv_pool_stats["cpu_used"])
+            else:
+                if "usedNumBlocks" in kv_stats and "maxNumBlocks" in kv_stats:
+                    max_num_blocks = kv_stats["maxNumBlocks"]
+                    if max_num_blocks:
+                        utilization = kv_stats["usedNumBlocks"] / max_num_blocks
+                        self._log_gauge(self.kv_cache_utilization, utilization)
+                if "maxNumBlocks" in kv_stats:
+                    self._log_gauge(self.kv_cache_max_blocks,
+                                    kv_stats["maxNumBlocks"])
+                if "freeNumBlocks" in kv_stats:
+                    self._log_gauge(self.kv_cache_free_blocks,
+                                    kv_stats["freeNumBlocks"])
+                if "usedNumBlocks" in kv_stats:
+                    self._log_gauge(self.kv_cache_used_blocks,
+                                    kv_stats["usedNumBlocks"])
             if "tokensPerBlock" in kv_stats:
                 self._log_gauge(self.kv_cache_tokens_per_block,
                                 kv_stats["tokensPerBlock"])
@@ -781,7 +854,7 @@ class MetricsCollector:
                                 spec_stats["draftOverhead"])
 
         # Per-iteration KV cache stats (aggregated across window sizes)
-        if kv_iter := iteration_stats.get("kvCacheIterationStats"):
+        if kv_iter:
             # Aggregate across all window sizes
             total_secondary_max = 0
             total_secondary_used = 0
