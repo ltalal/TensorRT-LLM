@@ -33,6 +33,7 @@ remove_unused_variables = true
 ####################################################################################################
 [tool.ruff]
 line-length = 100 # Line length limit for code
+target-version = "py310"
 # Supplemental lint approach: Group A files (not in legacy-files.txt) get full
 # ruff check + format. Group B files (in legacy-files.txt) get only supplemental
 # lint rules via ruff-legacy.toml, with formatting handled by yapf/isort/autoflake.
