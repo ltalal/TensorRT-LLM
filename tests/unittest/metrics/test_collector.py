@@ -26,8 +26,16 @@ from tensorrt_llm.metrics.perf_utils import process_req_perf_metrics
 def clean_registry():
     """Unregister all custom collectors between tests to avoid duplicate metric errors."""
     collectors_to_remove = []
+    metric_prefixes = ("trtllm_", "gpu_", "cpu_", "num_", "spec_decode_", "kv_cache_")
+    metric_names = {
+        "conf_kv_tokens_per_block",
+        "generation_tokens_total",
+        "prompt_tokens_total",
+    }
     for collector in REGISTRY._names_to_collectors.values():
-        if hasattr(collector, "_name") and collector._name.startswith("trtllm_"):
+        if not hasattr(collector, "_name"):
+            continue
+        if collector._name.startswith(metric_prefixes) or collector._name in metric_names:
             collectors_to_remove.append(collector)
     for collector in set(collectors_to_remove):
         try:
@@ -147,6 +155,31 @@ class TestKVCacheStats:
     def test_kv_cache_utilization(self, collector):
         collector.log_iteration_stats(SAMPLE_ITERATION_STATS)
         assert _get_gauge_value(collector, "kv_cache_utilization") == pytest.approx(0.6)
+
+    def test_kv_cache_primary_and_secondary_block_gauges(self, collector):
+        stats = {
+            **SAMPLE_ITERATION_STATS,
+            "kvCacheIterationStats": {
+                "200011": {
+                    "primaryMaxNumBlocks": 17421,
+                    "primaryFreeNumBlocks": 15422,
+                    "primaryUsedNumBlocks": 1999,
+                    "secondaryMaxNumBlocks": 143395,
+                    "secondaryFreeNumBlocks": 143395,
+                    "secondaryUsedNumBlocks": 0,
+                }
+            },
+        }
+
+        collector.log_iteration_stats(stats)
+
+        assert _get_gauge_value(collector, "kv_cache_max_blocks") == 17421
+        assert _get_gauge_value(collector, "kv_cache_free_blocks") == 15422
+        assert _get_gauge_value(collector, "kv_cache_used_blocks") == 1999
+        assert _get_gauge_value(collector, "kv_cache_utilization") == pytest.approx(1999 / 17421)
+        assert _get_gauge_value(collector, "kv_cache_host_max_blocks") == 143395
+        assert _get_gauge_value(collector, "kv_cache_host_free_blocks") == 143395
+        assert _get_gauge_value(collector, "kv_cache_host_used_blocks") == 0
 
     def test_kv_cache_hit_rate(self, collector):
         collector.log_iteration_stats(SAMPLE_ITERATION_STATS)

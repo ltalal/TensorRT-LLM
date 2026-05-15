@@ -110,6 +110,34 @@ prom_metrics = defaultdict(float, {
 TIMEOUT_KEEP_ALIVE = 5  # seconds.
 
 
+def _aggregate_kv_cache_pool_stats(stats: dict) -> Optional[dict]:
+    kv_iter = stats.get("kvCacheIterationStats")
+    if not kv_iter:
+        return None
+
+    pool_stats = {
+        "gpu_max": 0,
+        "gpu_free": 0,
+        "gpu_used": 0,
+        "cpu_max": 0,
+        "cpu_free": 0,
+        "cpu_used": 0,
+    }
+    for ws_stats in kv_iter.values():
+        pool_stats["gpu_max"] += ws_stats.get("primaryMaxNumBlocks", 0)
+        pool_stats["gpu_free"] += ws_stats.get("primaryFreeNumBlocks", 0)
+        pool_stats["gpu_used"] += ws_stats.get("primaryUsedNumBlocks", 0)
+        pool_stats["cpu_max"] += ws_stats.get("secondaryMaxNumBlocks", 0)
+        pool_stats["cpu_free"] += ws_stats.get("secondaryFreeNumBlocks", 0)
+        pool_stats["cpu_used"] += ws_stats.get("secondaryUsedNumBlocks", 0)
+
+    return pool_stats
+
+
+def _kv_cache_pool_usage(used_num_blocks: int, max_num_blocks: int) -> float:
+    return used_num_blocks / max_num_blocks if max_num_blocks else 0.0
+
+
 def _build_tool_strict_guided_decoding_params(tools, tool_parser_name):
     """Build GuidedDecodingParams with structural tags for tools with strict=True.
 
@@ -230,6 +258,7 @@ class OpenAIServer:
         self._iteration_stats_collector_task = None
         self._iteration_stats_wakeup_event = asyncio.Event()
         self.latest_stats = None
+        self.latest_kv_cache_pool_stats = None
         # The steady clock offset (in seconds) between this server and the disagg server
         self.disagg_server_steady_clock_offset = 0
         # Track requests with "GENERATION_COMPLETE" stage and their timestamps
@@ -962,14 +991,38 @@ class OpenAIServer:
 
             kv_stat = stats["kvCacheStats"]
 
-            free_num_blocks = kv_stat["freeNumBlocks"]
-            used_num_blocks = kv_stat["usedNumBlocks"]
-            max_num_blocks = kv_stat["maxNumBlocks"]
+            pool_stats = _aggregate_kv_cache_pool_stats(stats)
+            if pool_stats is not None:
+                self.latest_kv_cache_pool_stats = pool_stats
+            elif self.latest_kv_cache_pool_stats is not None:
+                pool_stats = self.latest_kv_cache_pool_stats
+            else:
+                pool_stats = {
+                    "gpu_max": kv_stat["maxNumBlocks"],
+                    "gpu_free": kv_stat["freeNumBlocks"],
+                    "gpu_used": kv_stat["usedNumBlocks"],
+                    "cpu_max": 0,
+                    "cpu_free": 0,
+                    "cpu_used": 0,
+                }
+
+            free_num_blocks = pool_stats["gpu_free"]
+            used_num_blocks = pool_stats["gpu_used"]
+            max_num_blocks = pool_stats["gpu_max"]
             self.metrics_collector.gpu_cache_usage_perc.set(
-                (max_num_blocks - free_num_blocks) / max_num_blocks)
+                _kv_cache_pool_usage(used_num_blocks, max_num_blocks))
             self.metrics_collector.gpu_cache_blocks_max.set(max_num_blocks)
             self.metrics_collector.gpu_cache_blocks_free.set(free_num_blocks)
             self.metrics_collector.gpu_cache_blocks_used.set(used_num_blocks)
+            self.metrics_collector.cpu_cache_usage_perc.set(
+                _kv_cache_pool_usage(pool_stats["cpu_used"],
+                                     pool_stats["cpu_max"]))
+            self.metrics_collector.cpu_cache_blocks_max.set(
+                pool_stats["cpu_max"])
+            self.metrics_collector.cpu_cache_blocks_free.set(
+                pool_stats["cpu_free"])
+            self.metrics_collector.cpu_cache_blocks_used.set(
+                pool_stats["cpu_used"])
             self.metrics_collector.gpu_cache_blocks_reused_total.set(
                 kv_stat["reusedBlocks"])
             self.metrics_collector.gpu_cache_blocks_missed_total.set(
