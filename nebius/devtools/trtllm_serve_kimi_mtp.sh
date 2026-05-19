@@ -10,4 +10,4 @@ exec trtllm-serve serve $MODEL_PATH --host 0.0.0.0 --port 8000 \
   --tool_parser multiline \
   --reasoning_parser deepseek-r1 \
   --served_model_name Kimi-K2.5  \
-  --extra_llm_api_options cfg_kimi_cursor.yaml
+  --extra_llm_api_options cfg_kimi_mtp.yaml
