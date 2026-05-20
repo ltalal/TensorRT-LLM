@@ -241,57 +241,48 @@ class TransformersTokenizer(TokenizerBase):
             skip_special_tokens: bool = False,
             clean_up_tokenization_spaces: Optional[bool] = None,
             spaces_between_special_tokens: bool = True) -> Tuple[str, dict]:
-        # Adapted from
-        # https://github.com/vllm-project/vllm/blob/v0.6.3/vllm/transformers_utils/detokenizer.py#L238
+        # Sliding-window incremental detokenization on token IDs (vLLM/TGI
+        # style), slicing from a shared prefix anchor.
+        # See https://github.com/vllm-project/vllm/blob/v0.6.3/vllm/transformers_utils/detokenizer.py#L172
         if prev_text is None:
             prev_text = ""
 
         if states is None:
             states = {}
-        last_new_tokens = states.pop('last_new_tokens', [])
-        pending_tokens = states.pop('pending_tokens', [])
-        # Some BPE/tiktoken decoders can render a token differently by itself than
-        # in a longer token span. E.g. the tokenizer decodes token "B" as " the",
-        # but tokens "B", "C" together as "the cat". If the previous emitted text
-        # was "the", slicing "the cat" by len(" the") would produce "cat", and the
-        # stream would incorrectly assemble "thecat". The incremental delta must be
-        # sliced from the last emitted decoded text, not from a fresh standalone
-        # decode of last tokens.
-        last_decoded_text = states.pop('last_decoded_text', '')
-
-        new_tokens = self.convert_ids_to_tokens(
-            token_ids, skip_special_tokens=skip_special_tokens)
-        # filter out None tokens
-        if None in new_tokens:
-            logger.warning(
-                "An unexpected \"None\" token was generated. This may be caused by a generated token ID being out of the "
-                "tokenizer's vocabulary. Filtering out \"None\" tokens from the newly generated tokens."
-            )
-            new_tokens = [token for token in new_tokens if token is not None]
-        pending_tokens.extend(new_tokens)
-
-        curr_new_text = self.convert_tokens_to_string(
-            last_new_tokens + pending_tokens,
-            skip_special_tokens=skip_special_tokens,
-            spaces_between_special_tokens=spaces_between_special_tokens)
-        if not flush and (len(curr_new_text) <= len(last_decoded_text)
-                          or curr_new_text.endswith("�")):
+        all_ids = states.pop("all_ids", [])
+        prefix_offset = states.pop("prefix_offset", 0)
+        read_offset = states.pop("read_offset", 0)
+        all_ids = list(all_ids) + list(token_ids)
+        decode_kwargs = {"skip_special_tokens": skip_special_tokens}
+        try:
+            prefix_text = self.tokenizer.decode(
+                all_ids[prefix_offset:read_offset],
+                spaces_between_special_tokens=spaces_between_special_tokens,
+                **decode_kwargs)
+            curr_new_text = self.tokenizer.decode(
+                all_ids[prefix_offset:],
+                spaces_between_special_tokens=spaces_between_special_tokens,
+                **decode_kwargs)
+        except TypeError:
+            # Fallback if tokenizer.decode does not accept
+            # spaces_between_special_tokens
+            prefix_text = self.tokenizer.decode(
+                all_ids[prefix_offset:read_offset], **decode_kwargs)
+            curr_new_text = self.tokenizer.decode(all_ids[prefix_offset:],
+                                                  **decode_kwargs)
+        if not flush and (len(curr_new_text) <= len(prefix_text)
+                          or curr_new_text.endswith("\ufffd")):
             return prev_text, {
-                'last_new_tokens': last_new_tokens,
-                'pending_tokens': pending_tokens,
-                'last_decoded_text': last_decoded_text,
+                "all_ids": all_ids,
+                "prefix_offset": prefix_offset,
+                "read_offset": read_offset
             }
 
-        raw_curr_new_text = curr_new_text
-        curr_new_text = curr_new_text[len(last_decoded_text):]
-        if clean_up_tokenization_spaces is None:
-            clean_up_tokenization_spaces = self.clean_up_tokenization_spaces
-        if clean_up_tokenization_spaces:
-            curr_new_text = self.clean_up_tokenization(curr_new_text)
+        curr_new_text = curr_new_text[len(prefix_text):]
         return prev_text + curr_new_text, {
-            'last_new_tokens': pending_tokens,
-            'pending_tokens': [],
-            'last_decoded_text': raw_curr_new_text,
+            "all_ids": all_ids,
+            "prefix_offset": read_offset,
+            "read_offset": len(all_ids),
         }
 
     def hf_decode_incrementally(

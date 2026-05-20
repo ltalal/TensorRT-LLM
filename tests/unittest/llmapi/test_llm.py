@@ -381,7 +381,7 @@ class _PrefixUnstableTokenizer:
         return {}
 
     def convert_ids_to_tokens(self, ids, skip_special_tokens=False):
-        id_to_token = {1: 'C'}
+        id_to_token = {0: 'B', 1: 'C'}
         return [id_to_token[id_] for id_ in ids]
 
     def convert_tokens_to_string(self,
@@ -394,6 +394,17 @@ class _PrefixUnstableTokenizer:
         }
         return decoded_text[tuple(tokens)]
 
+    def decode(self,
+               ids,
+               skip_special_tokens=False,
+               spaces_between_special_tokens=True):
+        decoded_text = {
+            tuple(): '',
+            (0, ): 'the',
+            (0, 1): 'the cat',
+        }
+        return decoded_text[tuple(ids)]
+
     def clean_up_tokenization(self, out_string):
         return out_string
 
@@ -405,15 +416,16 @@ def test_trtllm_decode_incrementally_slices_from_previous_decoded_text():
         [1],
         prev_text='the',
         states={
-            'last_new_tokens': ['B'],
-            'last_decoded_text': 'the',
+            'all_ids': [0],
+            'prefix_offset': 0,
+            'read_offset': 1,
         },
     )
 
     assert decoded_text == 'the cat'
-    assert states['last_new_tokens'] == ['C']
-    assert states['pending_tokens'] == []
-    assert states['last_decoded_text'] == 'the cat'
+    assert states['all_ids'] == [0, 1]
+    assert states['prefix_offset'] == 1
+    assert states['read_offset'] == 2
 
 
 @pytest.mark.parametrize('backend', ["HF", "TRTLLM"])
