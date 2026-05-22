@@ -164,7 +164,7 @@ class DeepSeekR1Parser(BaseReasoningParser):
                 return ReasoningParserResult(
                     reasoning_content=reasoning_content)
             reasoning_content = delta_text[:end_idx]
-            content = delta_text[end_idx + len(self.reasoning_end):]
+            content = delta_text[end_idx + len(self.reasoning_end):].lstrip()
             self.in_reasoning = False
             self._buffer = ""
             return ReasoningParserResult(content=content,

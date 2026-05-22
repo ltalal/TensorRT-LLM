@@ -149,7 +149,7 @@ class MultilineToolParser(BaseToolParser):
             first_call_start = current_text.find(self.bot_token)
             prefix_text = ""
             if first_call_start > 0 and self._emitted_call_count == 0 and not self._prefix_sent:
-                prefix_text = current_text[:first_call_start].replace(self.calls_begin, "").strip()
+                prefix_text = current_text[:first_call_start].replace(self.calls_begin, "").rstrip()
                 self._prefix_sent = True
 
             complete_calls, last_end = self._extract_complete_call_bodies(current_text)
